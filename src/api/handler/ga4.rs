@@ -562,13 +562,22 @@ async fn pull_data(
         AppError::bad_request("No GA4 property selected. Please select a property first.")
     })?;
 
-    debug!(property_id = %property_id, "Pulling data for property");
+    // Calculate start date: use provided, or get incremental start date
+    let start_date = payload.start_date.unwrap_or_else(|| {
+        storage_service::get_incremental_start_date(project_id, connector_id)
+    });
+
+    debug!(
+        property_id = %property_id,
+        start_date = %start_date,
+        "Pulling data for property"
+    );
 
     // Pull data from GA4
     let pull_params = ga4_service::PullParams {
         property_id,
         access_token,
-        start_date: payload.start_date,
+        start_date: Some(start_date),
     };
 
     let records = ga4_service::pull(pull_params)

@@ -84,3 +84,65 @@ async fn get_by_id(...) -> impl IntoResponse {
 Projects: `/projects` (CRUD)
 Connectors: `/projects/{project_id}/connectors` (CRUD)
 GA4: `/projects/{project_id}/connectors/ga4/[auth|status|properties|disconnect]`
+GA4 Data: `POST /projects/{project_id}/connectors/ga4/{connector_id}/pull`
+
+## GA4 Data Storage
+
+### Storage Location
+
+GA4 data is stored in DuckDB (columnar database optimized for analytics):
+```
+/tmp/ga4_data/{project_id}/{connector_id}/ga4.duckdb
+```
+
+### Schema
+
+```sql
+CREATE TABLE ga4_records (
+    -- Dimensions (composite primary key)
+    date VARCHAR,
+    country VARCHAR,
+    device_category VARCHAR,
+    event_name VARCHAR,
+    browser VARCHAR,
+    operating_system VARCHAR,
+    screen_resolution VARCHAR,
+    -- Metrics
+    active_users BIGINT,
+    sessions BIGINT,
+    screen_page_views BIGINT,
+    bounce_rate DOUBLE,
+    average_session_duration DOUBLE,
+    PRIMARY KEY (date, country, device_category, event_name, browser, operating_system, screen_resolution)
+);
+```
+
+### Deduplication Strategy
+
+The 7 dimension fields form a **composite primary key**. GA4 aggregates data by these dimensions, so each combination is unique per pull.
+
+- **UPSERT via `INSERT OR REPLACE`**: Existing records (same key) get updated, new records get inserted
+- **No duplicates**: Primary key constraint prevents duplicate rows across multiple pulls
+
+### Incremental Sync
+
+When pulling data, the start date is calculated automatically:
+
+| Scenario | Start Date | Rationale |
+|----------|------------|-----------|
+| First sync (no data) | `today - 30 days` | Initial backfill |
+| Subsequent syncs | `max_date - 2 days` | 2-day lookback handles GA4 data reprocessing (up to 72h) |
+| Manual override | Request body `start_date` | User-specified date |
+
+Configuration constants in `storage_service.rs`:
+- `LOOKBACK_DAYS = 2` - Re-pull buffer for GA4 reprocessing
+- `DEFAULT_BACKFILL_DAYS = 30` - Initial sync range
+
+### Performance Optimization
+
+| Sync Type | Method | Performance |
+|-----------|--------|-------------|
+| First sync (empty table) | `bulk_insert()` - DuckDB appender | ~10x faster |
+| Incremental sync | `upsert()` - INSERT OR REPLACE | Handles deduplication |
+
+The system detects first sync via `SELECT COUNT(*)` and chooses the appropriate method.
