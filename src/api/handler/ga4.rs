@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::api::error::AppError;
 use crate::models::connector::{Connector, ConnectorDetails, ConnectorType};
-use crate::services::ga4_service::{self, PullDataParams};
+use crate::services::{ga4_service, storage_service};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -72,9 +72,9 @@ pub struct PullDataRequest {
 
 #[derive(Debug, Serialize)]
 pub struct PullDataResponse {
-    pub success: bool,
-    pub file_path: String,
-    pub row_count: i64,
+    pub record_count: usize,
+    pub inserted_count: usize,
+    pub updated_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -508,14 +508,52 @@ async fn pull_data(
     let config: ConnectorDetails = serde_json::from_value(connector.config.clone())
         .map_err(|_| AppError::internal("Invalid connector config"))?;
 
-    let ConnectorDetails::Ga4 { access_token, property_id, expires_at, .. } = config;
+    let ConnectorDetails::Ga4 {
+        mut access_token,
+        refresh_token,
+        expires_at,
+        token_type,
+        property_id,
+        property_name,
+    } = config;
 
-    // Check token expiration
-    if let Some(exp) = expires_at {
-        if exp < Utc::now() {
-            warn!(expires_at = ?exp, "Token expired");
-            return Err(AppError::unauthorized("Token expired. Please re-authenticate."));
-        }
+    // Check and refresh token if expired
+    if ga4_service::is_token_expired(expires_at) {
+        let refresh_token_str = refresh_token.as_ref().ok_or_else(|| {
+            error!("Token expired and no refresh token available");
+            AppError::unauthorized("Token expired and no refresh token. Please re-authenticate.")
+        })?;
+
+        let new_token = ga4_service::refresh_token(&state.oauth_client, refresh_token_str)
+            .await
+            .map_err(AppError::internal)?;
+
+        // Update connector in database
+        let updated_config = ConnectorDetails::Ga4 {
+            access_token: new_token.access_token.clone(),
+            refresh_token: new_token.refresh_token.or(refresh_token),
+            expires_at: new_token.expires_at,
+            token_type,
+            property_id: property_id.clone(),
+            property_name,
+        };
+
+        let updated_connector = Connector {
+            id: connector.id,
+            project_id: connector.project_id,
+            name: connector.name.clone(),
+            connector_type: connector.connector_type.clone(),
+            config: serde_json::to_value(&updated_config).unwrap(),
+        };
+
+        state
+            .connector_repo
+            .update(&updated_connector)
+            .await
+            .map_err(AppError::from)?;
+
+        info!("Connector updated with refreshed token");
+        access_token = new_token.access_token;
     }
 
     // Check property is selected
@@ -526,28 +564,32 @@ async fn pull_data(
 
     debug!(property_id = %property_id, "Pulling data for property");
 
-    // Call the service
-    let params = PullDataParams {
-        project_id,
+    // Pull data from GA4
+    let pull_params = ga4_service::PullParams {
         property_id,
         access_token,
         start_date: payload.start_date,
     };
 
-    let result = ga4_service::pull_ga4_data(params)
+    let records = ga4_service::pull(pull_params)
         .await
         .map_err(AppError::internal)?;
 
+    // Store with upsert
+    let result = storage_service::store(project_id, connector_id, records)
+        .map_err(AppError::internal)?;
+
     info!(
-        file_path = %result.file_path,
-        row_count = result.row_count,
+        record_count = result.record_count,
+        inserted = result.inserted_count,
+        updated = result.updated_count,
         "Data pull completed"
     );
 
     Ok(Json(PullDataResponse {
-        success: result.success,
-        file_path: result.file_path,
-        row_count: result.row_count,
+        record_count: result.record_count,
+        inserted_count: result.inserted_count,
+        updated_count: result.updated_count,
     }))
 }
 
