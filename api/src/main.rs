@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::api::handler::{connector, ga4, project};
+use crate::api::handler::{connector, funnel, ga4, project};
 use crate::infrastructure::connector_repository::ConnectorRepository;
 use crate::infrastructure::project_repository::ProjectRepository;
 
@@ -79,6 +79,7 @@ async fn main() {
         .merge(project::routes())
         .merge(connector::routes())
         .merge(ga4::routes())
+        .merge(funnel::routes())
         .layer(cors)
         .with_state(state);
 
