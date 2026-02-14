@@ -1,4 +1,4 @@
-use duckdb::{params, Connection};
+use duckdb::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -65,8 +65,7 @@ pub fn query_funnel(
         return Err("No data available. Pull GA4 data first.".to_string());
     }
 
-    let conn =
-        Connection::open(&path).map_err(|e| format!("Failed to open DuckDB: {}", e))?;
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open DuckDB: {}", e))?;
 
     let dim_expr = dimension.to_sql_expr();
 
@@ -76,14 +75,14 @@ pub fn query_funnel(
             SELECT
                 {dim_expr} AS dimension,
                 CASE event_name
-                    WHEN 'session_start' THEN 'Session Start'
-                    WHEN 'view_item_list' THEN 'Category/Listing'
-                    WHEN 'view_item' THEN 'Product Page'
+                    WHEN 'session_start' THEN 'Home'
+                    WHEN 'view_item_list' THEN 'PLP'
+                    WHEN 'view_item' THEN 'PDP'
                     WHEN 'view_cart' THEN 'Cart'
                     WHEN 'begin_checkout' THEN 'Checkout'
-                    WHEN 'add_shipping_info' THEN 'Shipping Info'
-                    WHEN 'add_payment_info' THEN 'Payment Info'
-                    WHEN 'purchase' THEN 'Purchase Complete'
+                    WHEN 'add_shipping_info' THEN 'Shipping'
+                    WHEN 'add_payment_info' THEN 'Payment'
+                    WHEN 'purchase' THEN 'Confirmation'
                     ELSE NULL
                 END AS funnel_stage,
                 active_users AS users,
@@ -98,14 +97,14 @@ pub fn query_funnel(
                 CAST(SUM(users) AS BIGINT) AS total_users,
                 CAST(SUM(interactions) AS BIGINT) AS total_interactions,
                 CASE funnel_stage
-                    WHEN 'Session Start' THEN 1
-                    WHEN 'Category/Listing' THEN 2
-                    WHEN 'Product Page' THEN 3
+                    WHEN 'Home' THEN 1
+                    WHEN 'PLP' THEN 2
+                    WHEN 'PDP' THEN 3
                     WHEN 'Cart' THEN 4
                     WHEN 'Checkout' THEN 5
-                    WHEN 'Shipping Info' THEN 6
-                    WHEN 'Payment Info' THEN 7
-                    WHEN 'Purchase Complete' THEN 8
+                    WHEN 'Shipping' THEN 6
+                    WHEN 'Payment' THEN 7
+                    WHEN 'Confirmation' THEN 8
                 END AS stage_order
             FROM event_funnel
             WHERE funnel_stage IS NOT NULL
