@@ -11,7 +11,8 @@ use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use crate::api::error::AppError;
-use crate::models::survey::{SurveyResponse, SurveyStats};
+use crate::models::survey::{SimilarComment, SurveyResponse, SurveyStats};
+use crate::services::embedding_service;
 use crate::AppState;
 
 const REQUIRED_COLUMNS: &[&str] = &[
@@ -196,8 +197,27 @@ async fn upload_survey(
         "Survey responses inserted successfully"
     );
 
+    // Spawn background task to generate embeddings
+    let project_id_clone = project_id;
+    let embedding_service = state.embedding_service.clone();
+    let survey_repo = state.survey_repo.clone();
+
+    tokio::spawn(async move {
+        embedding_service::generate_embeddings_for_project(
+            project_id_clone,
+            embedding_service,
+            survey_repo,
+        )
+        .await;
+    });
+
+    info!(
+        project_id = %project_id,
+        "Background embedding generation started"
+    );
+
     Ok(Json(UploadResponse {
-        message: "Survey CSV uploaded and saved successfully".to_string(),
+        message: "Survey CSV uploaded and saved successfully. Embeddings are being generated in the background.".to_string(),
         row_count,
         inserted_count: inserted,
         columns: found_columns,
@@ -266,6 +286,117 @@ async fn get_stats(
     Ok(Json(stats))
 }
 
+#[derive(Debug, Serialize)]
+pub struct EmbeddingStatusResponse {
+    pub total_responses: i64,
+    pub pending: i64,
+    pub completed: i64,
+    pub failed: i64,
+    pub skipped: i64,
+}
+
+#[instrument(skip(state), fields(project_id = %project_id))]
+async fn get_embedding_status(
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+) -> Result<Json<EmbeddingStatusResponse>, AppError> {
+    info!("Fetching embedding generation status");
+
+    // Verify project exists
+    state
+        .project_repo
+        .find_by_id(project_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::not_found("Project not found"))?;
+
+    // Query status counts
+    let stats = sqlx::query!(
+        r#"
+        SELECT
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE embedding_status = 'pending') as pending,
+            COUNT(*) FILTER (WHERE embedding_status = 'completed') as completed,
+            COUNT(*) FILTER (WHERE embedding_status = 'failed') as failed,
+            COUNT(*) FILTER (WHERE embedding_status = 'skipped') as skipped
+        FROM survey_responses
+        WHERE project_id = $1
+        "#,
+        project_id
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(Json(EmbeddingStatusResponse {
+        total_responses: stats.total.unwrap_or(0),
+        pending: stats.pending.unwrap_or(0),
+        completed: stats.completed.unwrap_or(0),
+        failed: stats.failed.unwrap_or(0),
+        skipped: stats.skipped.unwrap_or(0),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SimilaritySearchRequest {
+    pub query: String,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    #[serde(default = "default_min_similarity")]
+    pub min_similarity: f64,
+}
+
+fn default_limit() -> i64 {
+    10
+}
+fn default_min_similarity() -> f64 {
+    0.5
+}
+
+#[derive(Debug, Serialize)]
+pub struct SimilaritySearchResponse {
+    pub query: String,
+    pub results: Vec<SimilarComment>,
+}
+
+#[instrument(skip(state, req), fields(project_id = %project_id))]
+async fn search_similar_comments(
+    State(state): State<AppState>,
+    Path(project_id): Path<Uuid>,
+    Json(req): Json<SimilaritySearchRequest>,
+) -> Result<Json<SimilaritySearchResponse>, AppError> {
+    info!(query = %req.query, "Searching for similar comments");
+
+    // Verify project exists
+    state
+        .project_repo
+        .find_by_id(project_id)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::not_found("Project not found"))?;
+
+    // Generate embedding for query
+    let query_embedding = state
+        .embedding_service
+        .generate_embedding(&req.query)
+        .map_err(AppError::internal)?
+        .ok_or_else(|| AppError::bad_request("Query text is empty"))?;
+
+    // Search for similar comments
+    let results = state
+        .survey_repo
+        .find_similar_comments(project_id, query_embedding, req.limit, req.min_similarity)
+        .await
+        .map_err(AppError::from)?;
+
+    info!(result_count = results.len(), "Found similar comments");
+
+    Ok(Json(SimilaritySearchResponse {
+        query: req.query,
+        results,
+    }))
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -275,5 +406,13 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/projects/{project_id}/qualitative/stats",
             get(get_stats),
+        )
+        .route(
+            "/projects/{project_id}/qualitative/embeddings/status",
+            get(get_embedding_status),
+        )
+        .route(
+            "/projects/{project_id}/qualitative/comments/search",
+            post(search_similar_comments),
         )
 }

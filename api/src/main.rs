@@ -5,7 +5,7 @@ mod services;
 
 use axum::{routing::get, Router};
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl, basic::BasicClient};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -15,6 +15,7 @@ use crate::infrastructure::connector_repository::ConnectorRepository;
 use crate::infrastructure::project_repository::ProjectRepository;
 use crate::infrastructure::survey_repository::SurveyRepository;
 use crate::services::connector_service::ConnectorService;
+use crate::services::embedding_service::EmbeddingService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -23,8 +24,10 @@ pub struct AppState {
     pub connector_service: ConnectorService,
     pub project_repo: ProjectRepository,
     pub survey_repo: SurveyRepository,
+    pub embedding_service: EmbeddingService,
     pub frontend_url: String,
     pub duckdb_base_path: String,
+    pub pool: PgPool,
 }
 
 async fn health() -> &'static str {
@@ -85,14 +88,19 @@ async fn main() {
         duckdb_base_path.clone(),
     );
 
+    let embedding_service = EmbeddingService::new()
+        .expect("Failed to initialize embedding service");
+
     let state = AppState {
         oauth_client: Arc::new(create_oauth_client()),
         connector_repo,
         connector_service,
         project_repo: ProjectRepository::new(pool.clone()),
-        survey_repo: SurveyRepository::new(pool),
+        survey_repo: SurveyRepository::new(pool.clone()),
+        embedding_service,
         frontend_url,
         duckdb_base_path,
+        pool,
     };
 
     let app = Router::new()
