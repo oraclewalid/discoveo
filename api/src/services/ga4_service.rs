@@ -54,9 +54,76 @@ struct Value {
     value: String,
 }
 
-// Flat record for storage
+// Report types
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportType {
+    EventReport,
+    PagePathReport,
+}
+
+impl ReportType {
+    pub fn table_name(&self) -> &'static str {
+        match self {
+            ReportType::EventReport => "ga4_events",
+            ReportType::PagePathReport => "ga4_page_paths",
+        }
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            ReportType::EventReport,
+            ReportType::PagePathReport,
+        ]
+    }
+
+    fn dimensions(&self) -> Vec<String> {
+        match self {
+            ReportType::EventReport => vec![
+                "date".to_string(),
+                "country".to_string(),
+                "deviceCategory".to_string(),
+                "eventName".to_string(),
+                "browser".to_string(),
+                "operatingSystem".to_string(),
+                "screenResolution".to_string(),
+            ],
+            ReportType::PagePathReport => vec![
+                "date".to_string(),
+                "pagePath".to_string(),
+            ],
+        }
+    }
+
+    fn metrics(&self) -> Vec<String> {
+        match self {
+            ReportType::EventReport => vec![
+                "activeUsers".to_string(),
+                "sessions".to_string(),
+                "screenPageViews".to_string(),
+                "bounceRate".to_string(),
+                "averageSessionDuration".to_string(),
+            ],
+            ReportType::PagePathReport => vec![
+                "screenPageViews".to_string(),
+                "totalUsers".to_string(),
+                "userEngagementDuration".to_string(),
+            ],
+        }
+    }
+}
+
+// Generic GA4 record
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GA4Record {
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GA4Record {
+    EventReport(EventRecord),
+    PagePathReport(PagePathRecord),
+}
+
+// Event report record (ga4_events table)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventRecord {
     pub date: String,
     pub country: String,
     pub device_category: String,
@@ -71,10 +138,21 @@ pub struct GA4Record {
     pub average_session_duration: f64,
 }
 
+// Page path report record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PagePathRecord {
+    pub date: String,
+    pub page_path: String,
+    pub screen_page_views: i64,
+    pub total_users: i64,
+    pub user_engagement_duration: f64,
+}
+
 pub struct PullParams {
     pub property_id: String,
     pub access_token: String,
     pub start_date: Option<NaiveDate>,
+    pub report_type: ReportType,
 }
 
 const PAGE_SIZE: i64 = 10000;
@@ -85,11 +163,15 @@ pub async fn pull(params: PullParams) -> Result<Vec<GA4Record>, String> {
         .unwrap_or_else(|| (Utc::now() - Duration::days(90)).date_naive());
     let end_date = Utc::now().date_naive();
 
+    let date_range_days = (end_date - start_date).num_days();
+
     info!(
         property_id = %params.property_id,
-        start_date = %start_date,
-        end_date = %end_date,
-        "Pulling GA4 data"
+        report_type = ?params.report_type,
+        start_date = %start_date.format("%Y-%m-%d"),
+        end_date = %end_date.format("%Y-%m-%d"),
+        date_range_days = date_range_days,
+        "Pulling GA4 data from API"
     );
 
     let mut all_records = Vec::new();
@@ -97,19 +179,24 @@ pub async fn pull(params: PullParams) -> Result<Vec<GA4Record>, String> {
     let mut total_rows: Option<i64> = None;
 
     loop {
-        let request = build_request(&start_date, &end_date, offset);
+        let request = build_request(&params.report_type, &start_date, &end_date, offset);
         let response = call_api(&params.property_id, &params.access_token, &request).await?;
 
         if total_rows.is_none() {
             total_rows = Some(response.row_count);
-            info!(total_rows = response.row_count, "Total rows to fetch");
+            info!(
+                report_type = ?params.report_type,
+                total_rows = response.row_count,
+                "Total rows to fetch"
+            );
         }
 
         let page_count = response.rows.len();
-        let records = flatten(response);
+        let records = flatten(params.report_type, response);
         all_records.extend(records);
 
         info!(
+            report_type = ?params.report_type,
             offset = offset,
             page_count = page_count,
             fetched = all_records.len(),
@@ -123,32 +210,35 @@ pub async fn pull(params: PullParams) -> Result<Vec<GA4Record>, String> {
         offset += PAGE_SIZE;
     }
 
-    info!(record_count = all_records.len(), "GA4 data pull complete");
+    info!(
+        report_type = ?params.report_type,
+        record_count = all_records.len(),
+        "GA4 data pull complete"
+    );
     Ok(all_records)
 }
 
-fn build_request(start_date: &NaiveDate, end_date: &NaiveDate, offset: i64) -> RunReportRequest {
+fn build_request(
+    report_type: &ReportType,
+    start_date: &NaiveDate,
+    end_date: &NaiveDate,
+    offset: i64,
+) -> RunReportRequest {
     RunReportRequest {
         date_ranges: vec![DateRange {
             start_date: start_date.format("%Y-%m-%d").to_string(),
             end_date: end_date.format("%Y-%m-%d").to_string(),
         }],
-        dimensions: vec![
-            Dimension { name: "date".to_string() },
-            Dimension { name: "country".to_string() },
-            Dimension { name: "deviceCategory".to_string() },
-            Dimension { name: "eventName".to_string() },
-            Dimension { name: "browser".to_string() },
-            Dimension { name: "operatingSystem".to_string() },
-            Dimension { name: "screenResolution".to_string() },
-        ],
-        metrics: vec![
-            Metric { name: "activeUsers".to_string() },
-            Metric { name: "sessions".to_string() },
-            Metric { name: "screenPageViews".to_string() },
-            Metric { name: "bounceRate".to_string() },
-            Metric { name: "averageSessionDuration".to_string() },
-        ],
+        dimensions: report_type
+            .dimensions()
+            .into_iter()
+            .map(|name| Dimension { name })
+            .collect(),
+        metrics: report_type
+            .metrics()
+            .into_iter()
+            .map(|name| Metric { name })
+            .collect(),
         limit: PAGE_SIZE,
         offset,
     }
@@ -191,7 +281,7 @@ async fn call_api(
     })
 }
 
-fn flatten(response: RunReportResponse) -> Vec<GA4Record> {
+fn flatten(report_type: ReportType, response: RunReportResponse) -> Vec<GA4Record> {
     response
         .rows
         .into_iter()
@@ -199,19 +289,28 @@ fn flatten(response: RunReportResponse) -> Vec<GA4Record> {
             let dims = &row.dimension_values;
             let metrics = &row.metric_values;
 
-            GA4Record {
-                date: dims.get(0).map(|v| v.value.clone()).unwrap_or_default(),
-                country: dims.get(1).map(|v| v.value.clone()).unwrap_or_default(),
-                device_category: dims.get(2).map(|v| v.value.clone()).unwrap_or_default(),
-                event_name: dims.get(3).map(|v| v.value.clone()).unwrap_or_default(),
-                browser: dims.get(4).map(|v| v.value.clone()).unwrap_or_default(),
-                operating_system: dims.get(5).map(|v| v.value.clone()).unwrap_or_default(),
-                screen_resolution: dims.get(6).map(|v| v.value.clone()).unwrap_or_default(),
-                active_users: parse_i64(metrics.get(0)),
-                sessions: parse_i64(metrics.get(1)),
-                screen_page_views: parse_i64(metrics.get(2)),
-                bounce_rate: parse_f64(metrics.get(3)),
-                average_session_duration: parse_f64(metrics.get(4)),
+            match report_type {
+                ReportType::EventReport => GA4Record::EventReport(EventRecord {
+                    date: dims.get(0).map(|v| v.value.clone()).unwrap_or_default(),
+                    country: dims.get(1).map(|v| v.value.clone()).unwrap_or_default(),
+                    device_category: dims.get(2).map(|v| v.value.clone()).unwrap_or_default(),
+                    event_name: dims.get(3).map(|v| v.value.clone()).unwrap_or_default(),
+                    browser: dims.get(4).map(|v| v.value.clone()).unwrap_or_default(),
+                    operating_system: dims.get(5).map(|v| v.value.clone()).unwrap_or_default(),
+                    screen_resolution: dims.get(6).map(|v| v.value.clone()).unwrap_or_default(),
+                    active_users: parse_i64(metrics.get(0)),
+                    sessions: parse_i64(metrics.get(1)),
+                    screen_page_views: parse_i64(metrics.get(2)),
+                    bounce_rate: parse_f64(metrics.get(3)),
+                    average_session_duration: parse_f64(metrics.get(4)),
+                }),
+                ReportType::PagePathReport => GA4Record::PagePathReport(PagePathRecord {
+                    date: dims.get(0).map(|v| v.value.clone()).unwrap_or_default(),
+                    page_path: dims.get(1).map(|v| v.value.clone()).unwrap_or_default(),
+                    screen_page_views: parse_i64(metrics.get(0)),
+                    total_users: parse_i64(metrics.get(1)),
+                    user_engagement_duration: parse_f64(metrics.get(2)),
+                }),
             }
         })
         .collect()

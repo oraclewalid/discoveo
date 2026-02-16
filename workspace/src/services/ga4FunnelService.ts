@@ -56,6 +56,78 @@ class GA4FunnelService {
       throw error
     }
   }
+
+  /**
+   * Get scroll depth data
+   */
+  async getScrollDepth(
+    projectId: string,
+    connectorId: string,
+    dimension: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<any[]> {
+    try {
+      const url = new URL(
+        `${config.api.baseUrl}projects/${projectId}/connectors/ga4/${connectorId}/scroll-depth`,
+      )
+      url.searchParams.append('dimension', dimension)
+      url.searchParams.append('start_date', startDate)
+      url.searchParams.append('end_date', endDate)
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: config.api.headers || {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch scroll depth data: ${response.statusText}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error('Get scroll depth error:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Get page paths data
+   */
+  async getPagePaths(
+    projectId: string,
+    connectorId: string,
+    dimension: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<any[]> {
+    try {
+      const url = new URL(
+        `${config.api.baseUrl}projects/${projectId}/connectors/ga4/${connectorId}/page-paths`,
+      )
+      url.searchParams.append('dimension', dimension)
+      url.searchParams.append('start_date', startDate)
+      url.searchParams.append('end_date', endDate)
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: config.api.headers || {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch page paths data: ${response.statusText}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error('Get page paths error:', error)
+      throw error
+    }
+  }
 }
 
 export default new GA4FunnelService()

@@ -1,5 +1,5 @@
 <template>
-  <div class="funnel-chart">
+  <div class="scroll-depth-analysis">
     <!-- Filters Card (Hidden if externally controlled) -->
     <v-card v-if="!isExternallyControlled" class="mb-6 filter-card" elevation="0">
       <v-card-text>
@@ -14,7 +14,7 @@
               density="compact"
               hide-details
               class="custom-field"
-              @update:model-value="handleFilterChange"
+              @update:model-value="loadData"
             />
           </v-col>
 
@@ -28,7 +28,7 @@
               density="compact"
               hide-details
               class="custom-field"
-              @update:model-value="handleFilterChange"
+              @update:model-value="loadData"
             />
           </v-col>
 
@@ -42,13 +42,13 @@
               density="compact"
               hide-details
               class="custom-field"
-              @update:model-value="handleFilterChange"
+              @update:model-value="loadData"
             />
           </v-col>
 
           <v-col cols="12" sm="2" class="text-right">
             <v-btn
-              @click="loadFunnelData"
+              @click="loadData"
               :loading="isLoading"
               color="primary"
               variant="flat"
@@ -62,9 +62,22 @@
       </v-card-text>
     </v-card>
 
-    <!-- Content Tabs -->
     <v-card elevation="0" class="content-card">
-      <v-tabs v-model="activeTab" color="primary" align-tabs="start" class="border-bottom">
+      <v-card-title class="px-8 pt-8 d-flex align-center">
+        <v-icon icon="mdi-mouse-move" color="primary" class="mr-3" />
+        Scroll Depth Analysis
+        <v-spacer />
+        <v-btn
+          icon="mdi-refresh"
+          variant="text"
+          size="small"
+          :loading="isLoading"
+          @click="loadData"
+        />
+      </v-card-title>
+
+      <!-- Tabs Header -->
+      <v-tabs v-model="activeTab" color="primary" align-tabs="start" class="px-4 border-bottom">
         <v-tab value="viz" class="text-none font-weight-bold">
           <v-icon start icon="mdi-chart-finance" />
           Visualization
@@ -82,13 +95,18 @@
             <div class="pa-8">
               <div v-if="isLoading" class="text-center py-12">
                 <v-progress-circular indeterminate color="primary" size="48" />
-                <p class="text-grey mt-4">Analyzing funnel trends...</p>
+                <p class="text-grey mt-4">Analyzing reader engagement...</p>
               </div>
 
-              <div v-else-if="!funnelData || funnelData.length === 0" class="text-center py-12 text-grey">
-                <v-icon icon="mdi-chart-arc" size="64" class="mb-4 opacity-20" />
-                <p class="text-h6">No data to visualize</p>
-                <p class="text-caption">Adjust your filters to see results</p>
+              <div v-else-if="error" class="text-center py-12">
+                <v-icon icon="mdi-alert-circle-outline" color="error" size="48" class="mb-4" />
+                <p class="text-error font-weight-bold">{{ error }}</p>
+                <v-btn variant="text" color="primary" class="mt-2" @click="loadData">Try again</v-btn>
+              </div>
+
+              <div v-else-if="!data || data.length === 0" class="text-center py-12 text-grey">
+                <v-icon icon="mdi-gauge-empty" size="64" class="mb-4 opacity-20" />
+                <p class="text-h6">No scroll data available</p>
               </div>
 
               <v-chart
@@ -104,59 +122,40 @@
           <v-window-item value="data">
             <div class="pa-0">
               <v-data-table
-                :headers="tableHeaders"
-                :items="funnelData || []"
+                :headers="headers"
+                :items="data"
                 :loading="isLoading"
-                class="funnel-table"
+                class="scroll-table"
+                hide-default-footer
                 hover
               >
-                <!-- Custom cell formatters -->
-                <template #[`item.total_users`]="{ item }">
-                  <span class="font-weight-bold">{{ item.total_users.toLocaleString() }}</span>
+                <template #[`item.scroll_depth`]="{ item }">
+                  <span class="font-weight-bold">{{ item.scroll_depth }}%</span>
                 </template>
-                <template #[`item.total_interactions`]="{ item }">
-                  {{ item.total_interactions.toLocaleString() }}
+                <template #[`item.users`]="{ item }">
+                  <span class="font-weight-bold">{{ item.users.toLocaleString() }}</span>
                 </template>
-                <template #[`item.users_dropped`]="{ item }">
-                  <span class="text-error font-weight-medium">
-                    {{ item.users_dropped !== null ? item.users_dropped.toLocaleString() : '-' }}
-                  </span>
+                <template #[`item.events`]="{ item }">
+                  {{ item.events.toLocaleString() }}
                 </template>
-                <template #[`item.dropoff_pct`]="{ item }">
+                <template #[`item.drop_off_pct`]="{ item }">
                   <v-chip
-                    v-if="item.dropoff_pct !== null"
-                    :color="item.dropoff_pct < 0 ? 'success' : 'error'"
+                    v-if="item.drop_off_pct"
+                    color="error"
                     size="x-small"
                     variant="tonal"
                     label
                     class="font-weight-bold"
                   >
-                    {{ item.dropoff_pct.toFixed(1) }}%
+                    {{ item.drop_off_pct }}%
                   </v-chip>
-                  <span v-else>-</span>
+                  <span v-else class="text-grey opacity-50">-</span>
                 </template>
-                <template #[`item.conversion_from_start_pct`]="{ item }">
-                  <div class="d-flex align-center">
-                    <span class="mr-2">{{ item.conversion_from_start_pct.toFixed(1) }}%</span>
-                    <v-progress-linear
-                      :model-value="item.conversion_from_start_pct"
-                      color="primary"
-                      height="4"
-                      rounded
-                      style="width: 60px"
-                    />
-                  </div>
-                </template>
-                <template #[`item.stage_conversion_pct`]="{ item }">
-                  <v-chip
-                    v-if="item.stage_conversion_pct !== null"
-                    color="primary"
-                    size="x-small"
-                    variant="outlined"
-                  >
-                    {{ item.stage_conversion_pct.toFixed(1) }}%
-                  </v-chip>
-                  <span v-else>-</span>
+                <template #[`item.users_lost`]="{ item }">
+                  <span v-if="item.users_lost" class="text-error-darken-1 font-weight-bold">
+                    -{{ item.users_lost.toLocaleString() }}
+                  </span>
+                  <span v-else class="text-grey opacity-50">-</span>
                 </template>
               </v-data-table>
             </div>
@@ -168,9 +167,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import ga4FunnelService from '@/services/ga4FunnelService'
-import type { FunnelData } from '@/types/funnel'
+import type { ScrollDepthData } from '@/types/analytics'
 
 interface Props {
   projectId: string
@@ -185,8 +184,7 @@ const props = withDefaults(defineProps<Props>(), {
   dimensionOptions: () => ['device_category', 'country', 'browser', 'operating_system'],
 })
 
-// State
-const funnelData = ref<FunnelData | null>(null)
+const data = ref<ScrollDepthData[]>([])
 const isLoading = ref(false)
 const error = ref('')
 const activeTab = ref('viz')
@@ -209,97 +207,73 @@ watch(() => props.externalDimension, (val) => { if (val) selectedDimension.value
 
 // Watch for changes to trigger refresh
 watch([() => props.externalStartDate, () => props.externalEndDate, () => props.externalDimension], () => {
-  if (isExternallyControlled.value) loadFunnelData()
+  if (isExternallyControlled.value) loadData()
 })
 
-// Table headers
-const tableHeaders = computed(() => {
-  const headers: any[] = [
-    { title: 'Rank', key: 'stage_order', width: '70px', align: 'center' },
-    { title: 'Funnel Stage', key: 'funnel_stage', align: 'start' },
-  ]
-
-  if (selectedDimension.value !== 'All') {
-    headers.push({ title: 'Segment', key: 'dimension', align: 'start' })
-  }
-
-  headers.push(
-    { title: 'Users', key: 'total_users', align: 'start' },
-    { title: 'Interactions', key: 'total_interactions', align: 'start' },
-    { title: 'Dropped', key: 'users_dropped', align: 'start' },
-    { title: 'Drop Rate', key: 'dropoff_pct', align: 'center' },
-    { title: 'Funnel Progress', key: 'conversion_from_start_pct', align: 'start' },
-    { title: 'Conversion', key: 'stage_conversion_pct', align: 'center' },
-  )
-
-  return headers
-})
-
-// Initialize dates
-onMounted(() => {
-  if (isExternallyControlled.value) {
-    if (props.externalStartDate) startDate.value = props.externalStartDate
-    if (props.externalEndDate) endDate.value = props.externalEndDate
-    if (props.externalDimension) selectedDimension.value = props.externalDimension
-  } else {
-    const end = new Date()
-    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000)
-    endDate.value = end.toISOString().split('T')[0]!
-    startDate.value = start.toISOString().split('T')[0]!
-  }
-  loadFunnelData()
-})
+const headers = [
+  { title: 'Depth', key: 'scroll_depth', align: 'start' as const },
+  { title: 'Readers', key: 'users', align: 'end' as const },
+  { title: 'Events', key: 'events', align: 'end' as const },
+  { title: 'Users Lost', key: 'users_lost', align: 'end' as const },
+  { title: 'Drop Rate', key: 'drop_off_pct', align: 'center' as const },
+]
 
 const formatDateForAPI = (dateString: string): string => dateString.replace(/-/g, '')
 
-const loadFunnelData = async () => {
+const loadData = async () => {
   if (!startDate.value || !endDate.value) return
   isLoading.value = true
   error.value = ''
   try {
     const dimension = selectedDimension.value === 'All' ? 'all' : selectedDimension.value
-    const data = await ga4FunnelService.getFunnelData(
+    const response = await ga4FunnelService.getScrollDepth(
       props.projectId,
       props.connectorId,
       dimension,
       formatDateForAPI(startDate.value),
-      formatDateForAPI(endDate.value),
+      formatDateForAPI(endDate.value)
     )
-    funnelData.value = data
+    // Sort by scroll depth ascending (25, 50, 75, 90)
+    data.value = (response as ScrollDepthData[]).sort((a, b) => a.scroll_depth - b.scroll_depth)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load'
+    console.error('Failed to load scroll depth:', err)
+    error.value = 'Failed to load scroll analysis'
   } finally {
     isLoading.value = false
   }
 }
 
-const handleFilterChange = () => {}
-
 // Chart option computed
 const chartOption = computed(() => {
-  if (!funnelData.value || funnelData.value.length === 0) return {}
-  const data = funnelData.value
-  const stageMap = new Map<number, Map<string, number>>()
-  const stageNameMap = new Map<number, string>()
+  if (!data.value || data.value.length === 0) return {}
+  
+  // Sort data by depth ascending
+  const sortedData = [...data.value].sort((a, b) => a.scroll_depth - b.scroll_depth)
+  
+  // Determine categories (Depths) and dimensions
+  const depths = Array.from(new Set(sortedData.map(i => i.scroll_depth))).sort((a, b) => a - b)
+  const depthLabels = depths.map(d => `${d}% Depth`)
+  
   const dimensionSet = new Set<string>()
-
-  data.forEach((item) => {
-    stageNameMap.set(item.stage_order, item.funnel_stage)
-    dimensionSet.add(item.dimension)
-    if (!stageMap.has(item.stage_order)) stageMap.set(item.stage_order, new Map())
-    stageMap.get(item.stage_order)!.set(item.dimension, item.total_users)
+  const depthDimensionMap = new Map<number, Map<string, number>>()
+  
+  sortedData.forEach(item => {
+    const dim = item.dimension || (selectedDimension.value === 'All' ? 'Total' : selectedDimension.value)
+    dimensionSet.add(dim)
+    if (!depthDimensionMap.has(item.scroll_depth)) {
+      depthDimensionMap.set(item.scroll_depth, new Map())
+    }
+    depthDimensionMap.get(item.scroll_depth)!.set(dim, item.users)
   })
-
-  const stages = Array.from(stageMap.keys()).sort((a, b) => a - b)
-  const stageLabels = stages.map((order) => stageNameMap.get(order) || '')
+  
   const dimensions = Array.from(dimensionSet).sort()
-
-  const series = dimensions.map((dimValue) => ({
+  
+  const series = dimensions.map(dimValue => ({
     name: dimValue,
     type: 'bar',
     stack: 'total',
     barWidth: '60%',
-    data: stages.map((stageOrder) => stageMap.get(stageOrder)?.get(dimValue) || 0),
+    data: depths.map(d => depthDimensionMap.get(d)?.get(dimValue) || 0),
     itemStyle: { borderRadius: 4 }
   }))
 
@@ -314,28 +288,39 @@ const chartOption = computed(() => {
       axisPointer: { type: 'shadow' }
     },
     legend: { bottom: 0, icon: 'circle', itemGap: 20 },
-    grid: { left: '2%', right: '2%', bottom: '10%', top: '5%', containLabel: true },
+    grid: { left: '2%', right: '2%', bottom: '10%', top: '10%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: stageLabels,
+      data: depthLabels,
       axisLine: { lineStyle: { color: '#e2e8f0' } },
       axisLabel: { color: '#64748b', fontSize: 11 }
     },
     yAxis: {
       type: 'value',
+      name: 'Readers',
       splitLine: { lineStyle: { type: 'dashed', color: '#f1f5f9' } },
       axisLabel: { color: '#64748b' }
     },
     series: series as any,
   }
 })
+
+onMounted(() => {
+  if (isExternallyControlled.value) {
+    if (props.externalStartDate) startDate.value = props.externalStartDate
+    if (props.externalEndDate) endDate.value = props.externalEndDate
+    if (props.externalDimension) selectedDimension.value = props.externalDimension
+  } else {
+    const end = new Date()
+    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000)
+    endDate.value = end.toISOString().split('T')[0]!
+    startDate.value = start.toISOString().split('T')[0]!
+  }
+  loadData()
+})
 </script>
 
 <style scoped>
-.funnel-chart {
-  width: 100%;
-}
-
 .filter-card {
   background: #f8fafc !important;
   border-radius: 16px !important;
@@ -349,7 +334,7 @@ const chartOption = computed(() => {
 }
 
 .content-card {
-  border-radius: 20px !important;
+  border-radius: 24px !important;
   border: 1px solid #e2e8f0 !important;
   background: white !important;
   overflow: hidden;
@@ -359,16 +344,20 @@ const chartOption = computed(() => {
   border-bottom: 1px solid #f1f5f9;
 }
 
-.funnel-table {
+.scroll-table {
   background: transparent !important;
 }
 
-.funnel-table :deep(th) {
+.scroll-table :deep(th) {
   background: #f8fafc !important;
   text-transform: uppercase;
   font-size: 11px !important;
   letter-spacing: 0.05em;
   font-weight: 700 !important;
   color: #64748b !important;
+}
+
+.scroll-table :deep(td) {
+  padding: 16px !important;
 }
 </style>

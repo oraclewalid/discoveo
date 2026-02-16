@@ -128,7 +128,7 @@ async fn delete_connector(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
-    let connector = match state.connector_repo.find_by_id(id).await {
+    let connector = match state.connector_service.find_by_id(id).await {
         Ok(Some(c)) => c,
         Ok(None) => return Err(AppError::not_found("Connector not found")),
         Err(e) => return Err(AppError::from(e)),
@@ -139,15 +139,15 @@ async fn delete_connector(
     }
 
     state
-        .connector_repo
+        .connector_service
         .delete(id)
         .await
         .map(|_| {
             Json(DeleteMessage {
-                message: "Connector deleted successfully".to_string(),
+                message: "Connector deleted and GA4 table dropped successfully".to_string(),
             })
         })
-        .map_err(AppError::from)
+        .map_err(AppError::internal)
 }
 
 pub fn routes() -> Router<AppState> {

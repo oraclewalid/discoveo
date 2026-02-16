@@ -62,6 +62,8 @@ pub struct SelectPropertyResponse {
 pub struct PullDataRequest {
     #[serde(default)]
     pub start_date: Option<chrono::NaiveDate>,
+    #[serde(default)]
+    pub report_type: Option<ga4_service::ReportType>,
 }
 
 #[derive(Debug, Serialize)]
@@ -569,43 +571,85 @@ async fn pull_data(
         AppError::bad_request("No GA4 property selected. Please select a property first.")
     })?;
 
-    // Calculate start date: use provided, or get incremental start date
-    let start_date = payload.start_date.unwrap_or_else(|| {
-        storage_service::get_incremental_start_date(&state.duckdb_base_path, project_id, connector_id)
-    });
-
-    debug!(
-        property_id = %property_id,
-        start_date = %start_date,
-        "Pulling data for property"
-    );
-
-    // Pull data from GA4
-    let pull_params = ga4_service::PullParams {
-        property_id,
-        access_token,
-        start_date: Some(start_date),
+    // Determine which report types to pull
+    let report_types = match payload.report_type {
+        Some(rt) => vec![rt],
+        None => {
+            info!("No report_type specified, pulling all report types");
+            ga4_service::ReportType::all()
+        }
     };
 
-    let records = ga4_service::pull(pull_params)
-        .await
+    let mut total_records = 0;
+    let mut total_inserted = 0;
+    let mut total_updated = 0;
+
+    // Pull data for each report type
+    for report_type in report_types {
+        // Calculate start date: use provided, or get incremental start date
+        let start_date = payload.start_date.unwrap_or_else(|| {
+            storage_service::get_incremental_start_date(
+                &state.duckdb_base_path,
+                project_id,
+                connector_id,
+                report_type,
+            )
+        });
+
+        info!(
+            property_id = %property_id,
+            report_type = ?report_type,
+            start_date = %start_date.format("%Y-%m-%d"),
+            provided_in_request = payload.start_date.is_some(),
+            "Starting data pull with calculated start date"
+        );
+
+        // Pull data from GA4
+        let pull_params = ga4_service::PullParams {
+            property_id: property_id.clone(),
+            access_token: access_token.clone(),
+            start_date: Some(start_date),
+            report_type,
+        };
+
+        let records = ga4_service::pull(pull_params)
+            .await
+            .map_err(AppError::internal)?;
+
+        // Store with upsert
+        let result = storage_service::store(
+            &state.duckdb_base_path,
+            project_id,
+            connector_id,
+            records,
+            report_type,
+        )
         .map_err(AppError::internal)?;
 
-    // Store with upsert
-    let result = storage_service::store(&state.duckdb_base_path, project_id, connector_id, records)
-        .map_err(AppError::internal)?;
+        info!(
+            report_type = ?report_type,
+            record_count = result.record_count,
+            inserted = result.inserted_count,
+            updated = result.updated_count,
+            "Report type data pull completed"
+        );
+
+        total_records += result.record_count;
+        total_inserted += result.inserted_count;
+        total_updated += result.updated_count;
+    }
 
     info!(
-        record_count = result.record_count,
-        inserted = result.inserted_count,
-        updated = result.updated_count,
-        "Data pull completed"
+        total_record_count = total_records,
+        total_inserted = total_inserted,
+        total_updated = total_updated,
+        "All data pulls completed"
     );
 
     Ok(Json(PullDataResponse {
-        record_count: result.record_count,
-        inserted_count: result.inserted_count,
-        updated_count: result.updated_count,
+        record_count: total_records,
+        inserted_count: total_inserted,
+        updated_count: total_updated,
     }))
 }
 

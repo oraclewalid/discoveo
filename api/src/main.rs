@@ -13,11 +13,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use crate::api::handler::{connector, funnel, ga4, project};
 use crate::infrastructure::connector_repository::ConnectorRepository;
 use crate::infrastructure::project_repository::ProjectRepository;
+use crate::services::connector_service::ConnectorService;
 
 #[derive(Clone)]
 pub struct AppState {
     pub oauth_client: Arc<BasicClient>,
     pub connector_repo: ConnectorRepository,
+    pub connector_service: ConnectorService,
     pub project_repo: ProjectRepository,
     pub frontend_url: String,
     pub duckdb_base_path: String,
@@ -75,9 +77,16 @@ async fn main() {
     let duckdb_base_path =
         std::env::var("DUCKDB_BASE_PATH").unwrap_or_else(|_| "/tmp/ga4_data".to_string());
 
+    let connector_repo = ConnectorRepository::new(pool.clone());
+    let connector_service = ConnectorService::new(
+        connector_repo.clone(),
+        duckdb_base_path.clone(),
+    );
+
     let state = AppState {
         oauth_client: Arc::new(create_oauth_client()),
-        connector_repo: ConnectorRepository::new(pool.clone()),
+        connector_repo,
+        connector_service,
         project_repo: ProjectRepository::new(pool),
         frontend_url,
         duckdb_base_path,
