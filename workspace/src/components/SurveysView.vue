@@ -1,35 +1,100 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import Papa from 'papaparse'
 import config from '@/config'
+import qualitativeService from '@/services/qualitativeService'
+import type { SurveyStats } from '@/types/analytics'
+
+const props = defineProps<{
+  projectId: string
+}>()
 
 const file = ref<File | null>(null)
 const isUploading = ref(false)
 const uploadStatus = ref<{ type: 'success' | 'error'; message: string } | null>(null)
 const dragOver = ref(false)
 
-const handleFileSelect = (event: Event) => {
+const REQUIRED_HEADERS = [
+  'Date',
+  'Country',
+  'URL',
+  'Device',
+  'Browser',
+  'OS',
+  'Ratings',
+  'Comments'
+]
+
+const validateCSV = (selectedFile: File) => {
+  return new Promise<{ isValid: boolean; error?: string }>((resolve) => {
+    Papa.parse(selectedFile, {
+      preview: 1, // Read only the first row (headers)
+      header: false,
+      skipEmptyLines: true,
+      complete: (results) => {
+        if (results.errors.length > 0) {
+          resolve({ isValid: false, error: 'CSV parsing error. Please check the file formatting.' })
+          return
+        }
+
+        const headers = results.data[0] as string[]
+        if (!headers || headers.length === 0) {
+          resolve({ isValid: false, error: 'The CSV file appears to be empty.' })
+          return
+        }
+
+        // Check for missing headers
+        const missingHeaders = REQUIRED_HEADERS.filter(
+          (required) => !headers.some(h => h.trim().toLowerCase() === required.toLowerCase())
+        )
+
+        if (missingHeaders.length > 0) {
+          resolve({ 
+            isValid: false, 
+            error: `Missing required columns: ${missingHeaders.join(', ')}` 
+          })
+        } else {
+          resolve({ isValid: true })
+        }
+      },
+      error: (err) => {
+        resolve({ isValid: false, error: `Error reading file: ${err.message}` })
+      }
+    })
+  })
+}
+
+const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
     const selectedFile = target.files[0]
-    if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
-      file.value = selectedFile
-      uploadStatus.ref = null
-    } else {
-      uploadStatus.value = { type: 'error', message: 'Please select a valid CSV file.' }
-    }
+    await processFile(selectedFile)
   }
 }
 
-const handleDrop = (event: DragEvent) => {
+const handleDrop = async (event: DragEvent) => {
   dragOver.value = false
   if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
     const droppedFile = event.dataTransfer.files[0]
-    if (droppedFile.type === 'text/csv' || droppedFile.name.endsWith('.csv')) {
-      file.value = droppedFile
-      uploadStatus.value = null
-    } else {
-      uploadStatus.value = { type: 'error', message: 'Please drop a valid CSV file.' }
-    }
+    await processFile(droppedFile)
+  }
+}
+
+const processFile = async (selectedFile: File) => {
+  uploadStatus.value = null
+  
+  if (selectedFile.type !== 'text/csv' && !selectedFile.name.endsWith('.csv')) {
+    uploadStatus.value = { type: 'error', message: 'Please select a valid CSV file.' }
+    file.value = null
+    return
+  }
+
+  const validation = await validateCSV(selectedFile)
+  if (!validation.isValid) {
+    uploadStatus.value = { type: 'error', message: validation.error || 'Invalid CSV format.' }
+    file.value = null
+  } else {
+    file.value = selectedFile
   }
 }
 
@@ -43,7 +108,7 @@ const uploadFile = async () => {
   formData.append('file', file.value)
 
   try {
-    const response = await fetch(`${config.api.baseUrl}/surveys/collect`, {
+    const response = await fetch(`${config.api.baseUrl}projects/${props.projectId}/qualitative/surveys`, {
       method: 'POST',
       body: formData,
       // Note: Don't set Content-Type header when using FormData, 
@@ -51,10 +116,15 @@ const uploadFile = async () => {
     })
 
     if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`)
+      const errorData = await response.json().catch(() => null)
+      throw new Error(errorData?.error || errorData?.message || `Upload failed: ${response.statusText}`)
     }
 
-    uploadStatus.value = { type: 'success', message: 'Survey data uploaded successfully!' }
+    const result = await response.json()
+    uploadStatus.value = { 
+      type: 'success', 
+      message: `Successfully uploaded ${result.row_count} survey rows!` 
+    }
     file.value = null
   } catch (error) {
     console.error('Upload error:', error)
@@ -67,10 +137,39 @@ const uploadFile = async () => {
   }
 }
 
+const stats = ref<SurveyStats | null>(null)
+const isLoadingStats = ref(false)
+
+const loadStats = async () => {
+  isLoadingStats.value = true
+  try {
+    stats.value = await qualitativeService.getSurveyStats(props.projectId)
+  } catch (error) {
+    console.error('Failed to load survey stats:', error)
+  } finally {
+    isLoadingStats.value = false
+  }
+}
+
 const clearFile = () => {
   file.value = null
   uploadStatus.value = null
 }
+
+const formatDate = (dateString?: string) => {
+  if (!dateString) return '-'
+  return new Date(dateString).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+onMounted(() => {
+  loadStats()
+})
+
+watch(() => props.projectId, () => loadStats())
 </script>
 
 <template>
@@ -79,6 +178,71 @@ const clearFile = () => {
       <h1 class="text-h3 font-weight-bold tracking-tight mb-2">Qualitative Data</h1>
       <p class="text-subtitle-1 text-grey-darken-1">Upload surveys, interviews, and usability test results</p>
     </div>
+
+    <!-- Stats Summary Section -->
+    <v-row v-if="stats" class="mb-8">
+      <v-col cols="12" sm="6" md="3">
+        <v-card class="stat-card" elevation="0">
+          <v-card-text>
+            <div class="d-flex align-center mb-2">
+              <v-avatar color="primary-lighten-5" size="32" class="mr-2">
+                <v-icon icon="mdi-poll" color="primary" size="18" />
+              </v-avatar>
+              <span class="text-caption font-weight-bold text-grey">TOTAL RESPONSES</span>
+            </div>
+            <div class="text-h4 font-weight-bold">{{ stats.total_responses.toLocaleString() }}</div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" sm="6" md="3">
+        <v-card class="stat-card" elevation="0">
+          <v-card-text>
+            <div class="d-flex align-center mb-2">
+              <v-avatar color="warning-lighten-5" size="32" class="mr-2">
+                <v-icon icon="mdi-star" color="warning" size="18" />
+              </v-avatar>
+              <span class="text-caption font-weight-bold text-grey">AVG. RATING</span>
+            </div>
+            <div class="text-h4 font-weight-bold">
+              {{ stats.average_rating.toFixed(2) }}
+              <span class="text-body-2 text-grey font-weight-medium">/ 5</span>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" sm="6" md="3">
+        <v-card class="stat-card" elevation="0">
+          <v-card-text>
+            <div class="d-flex align-center mb-2">
+              <v-avatar color="info-lighten-5" size="32" class="mr-2">
+                <v-icon icon="mdi-comment-text-multiple" color="info" size="18" />
+              </v-avatar>
+              <span class="text-caption font-weight-bold text-grey">WITH COMMENTS</span>
+            </div>
+            <div class="text-h4 font-weight-bold">{{ stats.responses_with_comments.toLocaleString() }}</div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" sm="6" md="3">
+        <v-card class="stat-card" elevation="0">
+          <v-card-text>
+            <div class="d-flex align-center mb-2">
+              <v-avatar color="success-lighten-5" size="32" class="mr-2">
+                <v-icon icon="mdi-calendar-range" color="success" size="18" />
+              </v-avatar>
+              <span class="text-caption font-weight-bold text-grey">DATE RANGE</span>
+            </div>
+            <div class="text-subtitle-1 font-weight-bold lh-1 mt-1">
+              {{ formatDate(stats.first_response_date) }} -<br>
+              {{ formatDate(stats.last_response_date) }}
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
 
     <v-row justify="center">
       <v-col cols="12" md="8" lg="6">
@@ -157,11 +321,7 @@ const clearFile = () => {
               To ensure proper processing, please make sure your CSV includes the following headers:
             </p>
             <v-chip-group>
-              <v-chip size="small" variant="tonal" border>user_id</v-chip>
-              <v-chip size="small" variant="tonal" border>survey_name</v-chip>
-              <v-chip size="small" variant="tonal" border>rating</v-chip>
-              <v-chip size="small" variant="tonal" border>comment</v-chip>
-              <v-chip size="small" variant="tonal" border>timestamp</v-chip>
+              <v-chip v-for="header in REQUIRED_HEADERS" :key="header" size="small" variant="tonal" border>{{ header }}</v-chip>
             </v-chip-group>
           </v-card-text>
         </v-card>
@@ -215,5 +375,20 @@ const clearFile = () => {
 
 .tracking-tight {
   letter-spacing: -0.025em;
+}
+
+.stat-card {
+  border-radius: 20px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
+  height: 100%;
+}
+
+.lh-1 {
+  line-height: 1.2 !important;
+}
+
+.text-grey-darken-1 {
+  color: #475569 !important;
 }
 </style>

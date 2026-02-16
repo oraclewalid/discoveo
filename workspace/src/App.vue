@@ -69,7 +69,7 @@ const handleLogin = async () => {
     currentView.value = 'projects';
     currentPage.value = 'list';
   } else {
-    currentView.value = 'funnels';
+    currentView.value = 'overview';
   }
 };
 
@@ -83,13 +83,13 @@ const handleLogout = () => {
 // Project Handlers
 const handleProjectListItemClick = (project: Project) => {
   selectedProject.value = project;
-  currentView.value = 'funnels';
+  currentView.value = 'overview';
 };
 
 const handleProjectSwitch = (project: Project) => {
   selectedProject.value = project;
   localStorage.setItem(STORAGE_KEY, project.id);
-  currentView.value = 'funnels';
+  currentView.value = 'overview';
 };
 
 const handleViewProject = (project: Project) => {
@@ -114,7 +114,8 @@ const handleFormSubmit = async (project: Project) => {
 
   isEditingProject.value = false;
   showForm.value = false;
-  currentPage.value = 'detail';
+  currentView.value = 'overview';
+  currentPage.value = 'list';
   await fetchGlobalProjects();
   projectListRef.value?.fetchProjects();
 };
@@ -374,8 +375,8 @@ const isProjectActive = computed(() => !!selectedProject.value);
           </div>
 
           <!-- Qualitative Data -->
-          <div v-else-if="currentView === 'qualitative'" key="qualitative">
-            <SurveysView />
+          <div v-else-if="currentView === 'qualitative' && selectedProject" key="qualitative">
+            <SurveysView :project-id="selectedProject.id" />
           </div>
 
           <!-- Recommendations -->

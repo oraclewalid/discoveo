@@ -18,3 +18,11 @@ export interface PagePathData {
   avg_time_per_user_sec: number;
   dimension?: string;
 }
+
+export interface SurveyStats {
+  total_responses: number;
+  average_rating: number;
+  first_response_date: string;
+  last_response_date: string;
+  responses_with_comments: number;
+}
