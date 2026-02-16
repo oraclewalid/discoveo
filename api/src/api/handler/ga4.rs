@@ -171,13 +171,16 @@ async fn auth_redirect(
     Ok(Redirect::temporary(auth_url.as_str()))
 }
 
-const FRONTEND_CALLBACK_URL: &str = "http://localhost:5173/ga4-oauth-callback";
+fn frontend_callback_url(frontend_url: &str) -> String {
+    format!("{}/ga4-oauth-callback", frontend_url)
+}
 
-fn redirect_error(description: &str) -> Redirect {
+fn redirect_error(frontend_url: &str, description: &str) -> Redirect {
     let encoded = urlencoding::encode(description);
     Redirect::temporary(&format!(
         "{}?error=access_denied&error_description={}",
-        FRONTEND_CALLBACK_URL, encoded
+        frontend_callback_url(frontend_url),
+        encoded
     ))
 }
 
@@ -188,11 +191,13 @@ async fn callback(
 ) -> Redirect {
     info!("Processing GA4 OAuth callback");
 
+    let frontend_url = &state.frontend_url;
+
     let project_id = match params.state.as_ref().and_then(|s| Uuid::parse_str(s).ok()) {
         Some(id) => id,
         None => {
             error!("Invalid or missing state parameter");
-            return redirect_error("Invalid or missing state parameter");
+            return redirect_error(frontend_url, "Invalid or missing state parameter");
         }
     };
 
@@ -202,11 +207,11 @@ async fn callback(
         Ok(Some(_)) => debug!("Project verified"),
         Ok(None) => {
             warn!(project_id = %project_id, "Project not found");
-            return redirect_error("Project not found");
+            return redirect_error(frontend_url, "Project not found");
         }
         Err(e) => {
             error!(error = %e, "Database error");
-            return redirect_error("Database error");
+            return redirect_error(frontend_url, "Database error");
         }
     }
 
@@ -220,7 +225,7 @@ async fn callback(
         Ok(t) => t,
         Err(e) => {
             error!(error = %e, "Failed to exchange code for tokens");
-            return redirect_error("Failed to exchange authorization code");
+            return redirect_error(frontend_url, "Failed to exchange authorization code");
         }
     };
 
@@ -257,12 +262,14 @@ async fn callback(
             info!(connector_id = %c.id, "GA4 connector created successfully");
             Redirect::temporary(&format!(
                 "{}?connector_id={}&project_id={}",
-                FRONTEND_CALLBACK_URL, c.id, project_id
+                frontend_callback_url(frontend_url),
+                c.id,
+                project_id
             ))
         }
         Err(e) => {
             error!(error = %e, "Failed to create connector");
-            redirect_error("Failed to create connector")
+            redirect_error(frontend_url, "Failed to create connector")
         }
     }
 }
@@ -564,7 +571,7 @@ async fn pull_data(
 
     // Calculate start date: use provided, or get incremental start date
     let start_date = payload.start_date.unwrap_or_else(|| {
-        storage_service::get_incremental_start_date(project_id, connector_id)
+        storage_service::get_incremental_start_date(&state.duckdb_base_path, project_id, connector_id)
     });
 
     debug!(
@@ -585,7 +592,7 @@ async fn pull_data(
         .map_err(AppError::internal)?;
 
     // Store with upsert
-    let result = storage_service::store(project_id, connector_id, records)
+    let result = storage_service::store(&state.duckdb_base_path, project_id, connector_id, records)
         .map_err(AppError::internal)?;
 
     info!(

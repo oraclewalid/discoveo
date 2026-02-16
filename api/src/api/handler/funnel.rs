@@ -50,6 +50,7 @@ async fn funnel(
     }
 
     let results = funnel_repository::query_funnel(
+        &state.duckdb_base_path,
         project_id,
         connector_id,
         params.dimension,

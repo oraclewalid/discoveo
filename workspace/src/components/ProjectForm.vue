@@ -1,49 +1,114 @@
 <template>
   <div class="project-form">
-    <h2>{{ isEditing ? 'Edit Project' : 'Create Project' }}</h2>
+    <!-- Breadcrumb-style Back Navigation -->
+    <div class="d-flex align-center mb-6">
+      <v-btn
+        @click="handleCancel"
+        variant="text"
+        color="grey-darken-1"
+        prepend-icon="mdi-chevron-left"
+        class="text-none px-0"
+      >
+        Discard and go back
+      </v-btn>
+    </div>
 
-    <form @submit.prevent="handleSubmit">
-      <div class="form-group">
-        <label for="name">Project Name *</label>
-        <input
-          id="name"
-          v-model="form.name"
-          type="text"
-          placeholder="Enter project name"
-          required
-          @input="validateName"
-        />
-        <span v-if="errors.name" class="error">{{ errors.name }}</span>
-      </div>
+    <v-card class="premium-form-card" elevation="0">
+      <v-card-text class="pa-10">
+        <div class="header-section text-center mb-10">
+          <v-avatar color="primary-lighten-5" size="80" class="mb-4">
+            <v-icon :icon="isEditing ? 'mdi-pencil-box-outline' : 'mdi-plus-box-outline'" color="primary" size="40" />
+          </v-avatar>
+          <h1 class="text-h4 font-weight-bold tracking-tight mb-2">
+            {{ isEditing ? 'Edit Project' : 'Create New Project' }}
+          </h1>
+          <p class="text-subtitle-1 text-grey-darken-1">
+            {{ isEditing ? 'Update your project information and settings below.' : 'Launch a new analytics project by filling in the details below.' }}
+          </p>
+        </div>
 
-      <div class="form-group">
-        <label for="description">Description</label>
-        <textarea
-          id="description"
-          v-model="form.description"
-          placeholder="Enter project description"
-          rows="4"
-        />
-      </div>
+        <v-form ref="formRef" @submit.prevent="handleSubmit">
+          <div class="form-section mb-8">
+            <div class="text-overline text-primary font-weight-bold mb-2">Basic Information</div>
+            
+            <v-label class="text-subtitle-2 font-weight-bold mb-2 text-grey-darken-3">Project Name</v-label>
+            <v-text-field
+              v-model="form.name"
+              placeholder="e.g. Q1 Marketing Funnel"
+              :rules="[rules.required]"
+              variant="solo"
+              flat
+              density="comfortable"
+              class="custom-field mb-6"
+              bg-color="grey-lighten-5"
+              required
+            >
+              <template v-slot:prepend-inner>
+                <v-icon icon="mdi-rocket-launch-outline" size="20" color="primary" />
+              </template>
+            </v-text-field>
 
-      <div class="form-actions">
-        <button type="submit" :disabled="isLoading" class="btn btn-primary">
-          {{ isLoading ? 'Saving...' : isEditing ? 'Update Project' : 'Create Project' }}
-        </button>
-        <button type="button" @click="handleCancel" class="btn btn-secondary">
-          Cancel
-        </button>
-      </div>
+            <v-label class="text-subtitle-2 font-weight-bold mb-2 text-grey-darken-3">Description</v-label>
+            <v-textarea
+              v-model="form.description"
+              placeholder="What is this project about? (Internal notes, objectives, etc.)"
+              variant="solo"
+              flat
+              density="comfortable"
+              class="custom-field mb-6"
+              bg-color="grey-lighten-5"
+              rows="4"
+              auto-grow
+            >
+              <template v-slot:prepend-inner>
+                <v-icon icon="mdi-text-box-outline" size="20" color="primary" />
+              </template>
+            </v-textarea>
+          </div>
 
-      <div v-if="apiError" class="error-message">
-        {{ apiError }}
-      </div>
-    </form>
+          <v-alert
+            v-if="apiError"
+            type="error"
+            variant="tonal"
+            closable
+            @click:close="apiError = ''"
+            class="mb-8 rounded-xl"
+          >
+            {{ apiError }}
+          </v-alert>
+
+          <v-divider class="my-8 opacity-10" />
+
+          <div class="actions-section d-flex align-center justify-end gap-4">
+            <v-btn
+              color="grey-darken-1"
+              variant="text"
+              size="large"
+              class="text-none font-weight-bold"
+              @click="handleCancel"
+              :disabled="isLoading"
+            >
+              Discard Changes
+            </v-btn>
+            <v-btn
+              color="primary"
+              variant="flat"
+              size="large"
+              class="text-none font-weight-bold px-10 elevation-4 rounded-xl"
+              :loading="isLoading"
+              @click="handleSubmit"
+            >
+              {{ isEditing ? 'Save Changes' : 'Create Project' }}
+            </v-btn>
+          </div>
+        </v-form>
+      </v-card-text>
+    </v-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue';
+import { ref, reactive, watch } from 'vue';
 import projectService from '@/services/projectService';
 import type { Project, CreateProjectDTO } from '@/types/project';
 
@@ -63,6 +128,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>();
 
+const formRef = ref();
 const isLoading = ref(false);
 const apiError = ref('');
 
@@ -71,17 +137,13 @@ const form = reactive({
   description: props.project?.description || '',
 });
 
-const errors = reactive({
-  name: '',
-});
-
-const validateName = () => {
-  errors.name = form.name.trim().length === 0 ? 'Project name is required' : '';
+const rules = {
+  required: (value: string) => !!value || 'Project name is required',
 };
 
 const handleSubmit = async () => {
-  validateName();
-  if (errors.name) return;
+  const { valid } = await formRef.value.validate();
+  if (!valid) return;
 
   isLoading.value = true;
   apiError.value = '';
@@ -90,7 +152,6 @@ const handleSubmit = async () => {
     const payload: CreateProjectDTO = {
       name: form.name,
       description: form.description,
-      status: form.status,
     };
 
     let result: Project;
@@ -105,7 +166,6 @@ const handleSubmit = async () => {
     }
 
     emit('submit', result);
-    resetForm();
   } catch (error) {
     apiError.value = error instanceof Error ? error.message : 'An error occurred';
   } finally {
@@ -114,125 +174,51 @@ const handleSubmit = async () => {
 };
 
 const handleCancel = () => {
-  resetForm();
   emit('cancel');
 };
 
-const resetForm = () => {
-  form.name = props.project?.name || '';
-  form.description = props.project?.description || '';
-  errors.name = '';
-  apiError.value = '';
-};
-
-watch(() => props.project, () => {
-  resetForm();
-});
+watch(() => props.project, (newVal) => {
+  if (newVal) {
+    form.name = newVal.name;
+    form.description = newVal.description || '';
+  }
+}, { immediate: true });
 </script>
 
 <style scoped>
 .project-form {
-  background: #f9f9f9;
-  padding: 24px;
-  border-radius: 8px;
-  max-width: 500px;
+  max-width: 800px;
   margin: 0 auto;
 }
 
-.project-form h2 {
-  margin-bottom: 24px;
-  color: #333;
-  font-size: 20px;
+.premium-form-card {
+  border-radius: 32px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
+  overflow: hidden;
 }
 
-.form-group {
-  margin-bottom: 16px;
+.custom-field :deep(.v-field) {
+  border-radius: 16px !important;
+  border: 1px solid #f1f5f9 !important;
+  transition: all 0.2s ease;
 }
 
-.form-group label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 500;
-  color: #555;
-  font-size: 14px;
+.custom-field :deep(.v-field--focused) {
+  border-color: #6366f1 !important;
+  background: white !important;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1) !important;
 }
 
-.form-group input,
-.form-group textarea,
-.form-group select {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 14px;
-  font-family: inherit;
+.tracking-tight {
+  letter-spacing: -0.025em;
 }
 
-.form-group input:focus,
-.form-group textarea:focus,
-.form-group select:focus {
-  outline: none;
-  border-color: #4a90e2;
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+.gap-4 {
+  gap: 16px;
 }
 
-.form-group textarea {
-  resize: vertical;
-}
-
-.form-actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 24px;
-}
-
-.btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  flex: 1;
-}
-
-.btn-primary {
-  background-color: #4a90e2;
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background-color: #357abd;
-}
-
-.btn-primary:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background-color: #e0e0e0;
-  color: #333;
-}
-
-.btn-secondary:hover {
-  background-color: #d0d0d0;
-}
-
-.error {
-  display: block;
-  color: #e74c3c;
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-.error-message {
-  padding: 12px;
-  background-color: #ffe0e0;
-  color: #e74c3c;
-  border-radius: 4px;
-  margin-top: 16px;
-  font-size: 14px;
+.text-overline {
+  letter-spacing: 0.1em !important;
 }
 </style>

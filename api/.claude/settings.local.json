@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(duckdb:*)",
+      "Bash(cargo:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(sqlx database create)",
+      "Bash(sqlx migrate run)",
+      "Bash(export DATABASE_URL=postgres://local:local@localhost:5432/discoveo)",
+      "WebFetch(domain:duckdb.org)"
+    ]
+  }
+}

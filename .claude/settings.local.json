@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__postgres-discoveo__query",
+      "Bash(PGPASSWORD=\"super-secret-password-syno\" psql:*)",
+      "Bash(nc:*)",
+      "Bash(ping:*)",
+      "Bash(PGPASSWORD='super-secret-password-syno' psql:*)",
+      "Bash(npm view:*)",
+      "Bash(npm search mcp postgres)",
+      "mcp__postgres-discoveo__list_tables",
+      "mcp__postgres-discoveo__get_schema",
+      "mcp__postgres-discoveo__query_data",
+      "mcp__postgres-discoveo__describe_table",
+      "mcp__postgres-discoveo__get_table_sample",
+      "mcp__postgres-discoveo__count_rows",
+      "mcp__postgres-discoveo__get_relationships",
+      "mcp__postgres-discoveo__get_connection_status",
+      "mcp__backroom-prod__query_data",
+      "mcp__backroom-prod__get_schema",
+      "mcp__backroom-prod__list_tables",
+      "mcp__discoveo__search_objects",
+      "mcp__discoveo__execute_sql",
+      "Bash(npx vue-tsc --noEmit)"
+    ]
+  }
+}

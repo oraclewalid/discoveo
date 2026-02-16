@@ -1,469 +1,356 @@
 <template>
   <div class="project-detail">
-    <button @click="handleBack" class="btn btn-back">
-      &larr; Back to Projects
-    </button>
-
-    <div v-if="project" class="detail-container">
-      <div class="detail-header">
-        <h1>{{ project.name }}</h1>
-        <div class="detail-id">
-          <span>ID:</span>
-          <code>{{ project.id }}</code>
-        </div>
-      </div>
-
-      <div class="detail-content">
-        <section class="description-section">
-          <h2>Description</h2>
-          <p v-if="project.description" class="description">
-            {{ project.description }}
-          </p>
-          <p v-else class="no-description">No description provided</p>
-        </section>
-
-        <section class="connectors-section">
-          <h2>Connectors</h2>
-
-          <div v-if="isLoadingGA4" class="connector-loading">
-            Loading GA4 status...
-          </div>
-
-          <div v-else-if="isGA4Connected && ga4Status" class="connector-connected">
-            <div class="connection-header">
-              <span :class="['status-indicator', ga4Status.is_expired ? 'expired' : 'connected']">●</span>
-              <h3>Google Analytics 4 - {{ ga4Status.is_expired ? 'Expired' : 'Connected' }}</h3>
-            </div>
-
-            <div class="connection-details">
-              <div class="detail-item">
-                <span class="label">Connector ID:</span>
-                <span class="value">{{ ga4Status.connector_id }}</span>
-              </div>
-              <div class="detail-item">
-                <span class="label">Expires At:</span>
-                <span class="value">{{ new Date(ga4Status.expires_at).toLocaleDateString() }}</span>
-              </div>
-              <div v-if="ga4Status.propertyName" class="detail-item">
-                <span class="label">Property:</span>
-                <span class="value">{{ ga4Status.propertyName }}</span>
-              </div>
-              <div v-if="ga4Status.lastSync" class="detail-item">
-                <span class="label">Last Sync:</span>
-                <span class="value">{{ new Date(ga4Status.lastSync).toLocaleDateString() }}</span>
-              </div>
-            </div>
-
-            <div class="connector-actions">
-              <button @click="handlePullData" class="btn btn-sm btn-primary">
-                Pull Data
-              </button>
-              <button @click="handleDisconnectGA4" class="btn btn-sm btn-danger">
-                Disconnect
-              </button>
-            </div>
-          </div>
-
-          <div v-else class="connector-list">
-            <a
-              :href="ga4AuthUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="connector-link"
-            >
-              <span class="connector-icon">📊</span>
-              <span class="connector-name">Connect to GA4</span>
-              <span class="external-icon">↗</span>
-            </a>
-          </div>
-
-          <div v-if="ga4Error" class="error-message">
-            {{ ga4Error }}
-          </div>
-        </section>
-      </div>
+    <!-- Breadcrumb-style Back Navigation -->
+    <div class="d-flex align-center mb-6">
+      <v-btn
+        @click="handleBack"
+        variant="text"
+        color="grey-darken-1"
+        prepend-icon="mdi-chevron-left"
+        class="text-none px-0 mr-4"
+      >
+        Back to projects
+      </v-btn>
+      <v-divider vertical class="mx-2" style="height: 20px" />
+      <span class="text-body-2 font-weight-medium text-grey ml-4">
+        Projects / {{ project?.name || 'Loading...' }}
+      </span>
     </div>
 
-    <div v-else class="loading">
-      Loading project details...
+    <!-- Loading State -->
+    <div v-if="!project" class="text-center py-12">
+      <v-progress-circular indeterminate color="primary" size="64" />
     </div>
+
+    <!-- Project Details -->
+    <div v-else class="detail-container">
+      <v-row>
+        <!-- Left Column: Main Info -->
+        <v-col cols="12" lg="8">
+          <v-card class="premium-detail-card mb-6" elevation="0">
+            <v-card-text class="pa-8">
+              <div class="d-flex justify-space-between align-start mb-6">
+                <div>
+                  <h1 class="text-h3 font-weight-bold tracking-tight mb-2">
+                    {{ project.name }}
+                  </h1>
+                  <v-chip color="primary" variant="flat" size="small" class="font-weight-bold px-4">
+                    ACTIVE PROJECT
+                  </v-chip>
+                </div>
+                <div class="d-flex gap-2">
+                  <v-btn icon="mdi-pencil-outline" variant="tonal" color="primary" @click="handleEdit" />
+                  <v-btn icon="mdi-delete-outline" variant="tonal" color="error" @click="handleDelete" />
+                </div>
+              </div>
+
+              <div class="description-section mt-8">
+                <div class="text-overline text-primary font-weight-bold mb-2">Project Description</div>
+                <p v-if="project.description" class="text-h6 font-weight-regular text-grey-darken-2 lh-relaxed">
+                  {{ project.description }}
+                </p>
+                <p v-else class="text-body-1 text-grey font-italic">No description provided for this project.</p>
+              </div>
+
+              <v-divider class="my-8 opacity-10" />
+
+              <div class="d-flex align-center">
+                <div class="project-meta-item mr-8">
+                  <div class="text-caption text-grey font-weight-bold text-uppercase">Project ID</div>
+                  <div class="text-body-1 font-weight-bold text-mono">{{ project.id }}</div>
+                </div>
+                <div class="project-meta-item">
+                  <div class="text-caption text-grey font-weight-bold text-uppercase">Status</div>
+                  <div class="d-flex align-center">
+                    <div class="status-dot bg-success mr-2"></div>
+                    <span class="text-body-1 font-weight-bold">Healthy</span>
+                  </div>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+
+        </v-col>
+
+        <!-- Right Column: Connectors & Actions -->
+        <v-col cols="12" lg="4">
+          <v-card class="side-card mb-6" elevation="0">
+            <v-card-title class="pa-6 border-bottom">
+              <span class="text-h6 font-weight-bold">Data Sources</span>
+            </v-card-title>
+            
+            <v-card-text class="pa-6">
+              <!-- Loading GA4 Status -->
+              <div v-if="isLoadingGA4" class="py-4">
+                <v-progress-linear indeterminate color="primary" rounded height="6" />
+                <p class="text-caption text-center text-grey mt-2">Syncing connector status...</p>
+              </div>
+
+              <!-- GA4 Connected State -->
+              <div v-else-if="isGA4Connected && ga4Status" class="ga4-premium-widget">
+                <div class="widget-header d-flex align-center mb-4">
+                  <v-avatar color="primary-lighten-5" rounded="lg" size="48" class="mr-4">
+                    <v-icon icon="mdi-google-analytics" color="primary" />
+                  </v-avatar>
+                  <div>
+                    <div class="text-subtitle-2 font-weight-bold">GA4 Connector</div>
+                    <div class="d-flex align-center">
+                      <span class="text-caption" :class="ga4Status.is_expired ? 'text-warning' : 'text-success'">
+                         {{ ga4Status.is_expired ? 'Expired' : 'Live Syncing' }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <v-list density="compact" class="bg-transparent mb-4">
+                  <v-list-item class="px-0">
+                    <template v-slot:prepend><v-icon icon="mdi-domain" size="16" class="mr-2 opacity-50" /></template>
+                    <v-list-item-subtitle class="text-caption">Property</v-list-item-subtitle>
+                    <v-list-item-title class="text-body-2 font-weight-bold">{{ ga4Status.propertyName || 'N/A' }}</v-list-item-title>
+                  </v-list-item>
+                  <v-list-item class="px-0">
+                    <template v-slot:prepend><v-icon icon="mdi-sync" size="16" class="mr-2 opacity-50" /></template>
+                    <v-list-item-subtitle class="text-caption">Last Sync</v-list-item-subtitle>
+                    <v-list-item-title class="text-body-2 font-weight-bold">
+                      {{ ga4Status.lastSync ? new Date(ga4Status.lastSync).toLocaleDateString() : 'Never' }}
+                    </v-list-item-title>
+                  </v-list-item>
+                </v-list>
+
+                <v-btn block color="primary" variant="flat" class="mb-2" prepend-icon="mdi-sync" @click="handlePullData">
+                  Sync Now
+                </v-btn>
+                <v-btn block color="error" variant="text" size="small" @click="handleDisconnectGA4">
+                  Disconnect Source
+                </v-btn>
+              </div>
+
+              <!-- GA4 Not Connected State -->
+              <v-card v-else variant="outlined" color="primary" class="border-dashed bg-primary-lighten-5 pa-6 text-center" @click="handleConnectGA4">
+                <v-icon icon="mdi-google-analytics" size="48" class="mb-4" />
+                <div class="text-subtitle-1 font-weight-bold mb-1">Add Google Analytics</div>
+                <p class="text-caption mb-4">Integrate your funnel data automatically.</p>
+                <v-btn color="primary" variant="flat" block>Connect</v-btn>
+              </v-card>
+            </v-card-text>
+          </v-card>
+
+          <!-- Quick Actions -->
+          <v-card class="side-card" elevation="0">
+            <v-card-title class="pa-6 border-bottom">
+              <span class="text-h6 font-weight-bold">Quick Insights</span>
+            </v-card-title>
+            <v-card-text class="pa-6">
+              <div v-for="action in quickActions" :key="action.title" class="mb-4">
+                <v-btn block variant="tonal" :color="action.color" class="justify-start px-4 h-auto py-3">
+                  <template v-slot:prepend>
+                    <v-avatar :color="action.color + '-lighten-4'" size="32" class="mr-2">
+                      <v-icon :icon="action.icon" size="18" :color="action.color" />
+                    </v-avatar>
+                  </template>
+                  <div class="text-left">
+                    <div class="text-subtitle-2 font-weight-bold">{{ action.title }}</div>
+                    <div class="text-caption opacity-70">{{ action.desc }}</div>
+                  </div>
+                </v-btn>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+    </div>
+
+    <!-- Dialogs -->
+    <v-dialog v-model="deleteDialog" max-width="450">
+      <v-card class="rounded-xl pa-4">
+        <v-card-title class="text-h5 font-weight-bold">Delete Project?</v-card-title>
+        <v-card-text>This will permanently remove the project and all its connection data.</v-card-text>
+        <v-card-actions class="mt-4">
+          <v-spacer />
+          <v-btn variant="text" color="grey" @click="deleteDialog = false">Cancel</v-btn>
+          <v-btn variant="flat" color="error" class="px-6" @click="confirmDelete">Yes, Delete</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="disconnectDialog" max-width="450">
+      <v-card class="rounded-xl pa-4">
+        <v-card-title class="text-h5 font-weight-bold">Disconnect GA4?</v-card-title>
+        <v-card-text>You will stop receiving updates, but historical data will remain.</v-card-text>
+        <v-card-actions class="mt-4">
+          <v-spacer />
+          <v-btn variant="text" color="grey" @click="disconnectDialog = false">Keep Connected</v-btn>
+          <v-btn variant="flat" color="warning" class="px-6" @click="confirmDisconnect">Disconnect</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="pullDataSnackbar" color="success" class="custom-snackbar">
+      <v-icon icon="mdi-check-circle" class="mr-2" />
+      Syncing funnel data...
+    </v-snackbar>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
-import type { Project } from '@/types/project';
-import type { GA4ConnectorStatus } from '@/types/ga4';
-import projectService from '@/services/projectService';
-import ga4Service from '@/services/ga4Service';
-import config from '@/config';
+import { computed, ref, onMounted } from 'vue'
+import type { Project } from '@/types/project'
+import type { GA4ConnectorStatus } from '@/types/ga4'
+import projectService from '@/services/projectService'
+import ga4Service from '@/services/ga4Service'
+import config from '@/config'
 
 interface Props {
-  project: Project;
+  project: Project
 }
 
 interface Emits {
-  (e: 'back'): void;
-  (e: 'edit'): void;
-  (e: 'delete'): void;
+  (e: 'back'): void
+  (e: 'edit'): void
+  (e: 'delete'): void
 }
 
-const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
+const props = defineProps<Props>()
+const emit = defineEmits<Emits>()
 
-const project = computed(() => props.project);
-const ga4Status = ref<GA4ConnectorStatus | null>(null);
-const isLoadingGA4 = ref(false);
-const ga4Error = ref('');
+const project = computed(() => props.project)
+const ga4Status = ref<GA4ConnectorStatus | null>(null)
+const isLoadingGA4 = ref(false)
+const ga4Error = ref('')
+const deleteDialog = ref(false)
+const disconnectDialog = ref(false)
+const pullDataSnackbar = ref(false)
 
 const ga4AuthUrl = computed(() => {
-  return `${config.api.baseUrl}projects/${project.value.id}/connectors/ga4/auth/redirect`;
-});
+  return `${config.api.baseUrl}projects/${project.value.id}/connectors/ga4/auth/redirect`
+})
 
-const isGA4Connected = computed(() => {
-  return ga4Status.value !== null;
-});
+const isGA4Connected = computed(() => ga4Status.value !== null)
 
-const handleBack = () => {
-  emit('back');
-};
+const quickActions = [
+  { title: 'AI Audit', desc: 'Run automated project quality check.', icon: 'mdi-robot-confused', color: 'primary' },
+  { title: 'Export PDF', desc: 'Generate monthly performance report.', icon: 'mdi-file-pdf-box', color: 'secondary' },
+  { title: 'Team Access', desc: 'Manage project collaborators.', icon: 'mdi-account-group', color: 'accent' },
+]
 
-const handleEdit = () => {
-  emit('edit');
-};
+const handleBack = () => emit('back')
+const handleEdit = () => emit('edit')
+const handleDelete = () => deleteDialog.value = true
 
-const handleDelete = async () => {
-  if (!confirm('Are you sure you want to delete this project?')) {
-    return;
-  }
+const handleConnectGA4 = () => {
+  window.open(ga4AuthUrl.value, '_blank')
+}
 
+const confirmDelete = async () => {
   try {
-    await projectService.delete(project.value.id);
-    emit('delete');
+    await projectService.delete(project.value.id)
+    deleteDialog.value = false
+    emit('delete')
   } catch (error) {
-    alert(`Error: ${error instanceof Error ? error.message : 'Failed to delete project'}`);
+    ga4Error.value = error instanceof Error ? error.message : 'Failed to delete'
   }
-};
+}
 
-const handleDisconnectGA4 = async () => {
-  if (!confirm('Are you sure you want to disconnect from GA4?')) {
-    return;
-  }
+const handleDisconnectGA4 = () => disconnectDialog.value = true
 
+const confirmDisconnect = async () => {
   try {
-    await ga4Service.disconnect(project.value.id);
-    ga4Status.value = null;
+    await ga4Service.disconnect(project.value.id)
+    ga4Status.value = null
+    disconnectDialog.value = false
   } catch (error) {
-    ga4Error.value = error instanceof Error ? error.message : 'Failed to disconnect';
+    ga4Error.value = error instanceof Error ? error.message : 'Failed to disconnect'
   }
-};
+}
 
 const handlePullData = async () => {
-  if (!ga4Status.value) return;
-
+  if (!ga4Status.value) return
   try {
-    await ga4Service.pullData(project.value.id, ga4Status.value.connector_id);
-    alert('Data pull started successfully!');
+    await ga4Service.pullData(project.value.id, ga4Status.value.connector_id)
+    pullDataSnackbar.value = true
   } catch (error) {
-    ga4Error.value = error instanceof Error ? error.message : 'Failed to pull data';
+    ga4Error.value = error instanceof Error ? error.message : 'Failed to pull'
   }
-};
+}
 
 const fetchGA4Status = async () => {
-  isLoadingGA4.value = true;
-  ga4Error.value = '';
-
+  isLoadingGA4.value = true
   try {
-    const status = await ga4Service.getStatus(project.value.id);
-    ga4Status.value = status;
+    const status = await ga4Service.getStatus(project.value.id)
+    ga4Status.value = status
   } catch (error) {
-    console.error('Failed to fetch GA4 status:', error);
-    ga4Error.value = error instanceof Error ? error.message : 'Failed to load GA4 status';
+    console.error('Failed to fetch GA4 status:', error)
   } finally {
-    isLoadingGA4.value = false;
+    isLoadingGA4.value = false
   }
-};
+}
 
-onMounted(() => {
-  fetchGA4Status();
-});
+onMounted(() => fetchGA4Status())
 </script>
 
 <style scoped>
 .project-detail {
-  background: white;
-  border-radius: 8px;
-  padding: 32px;
-  min-height: 100vh;
+  width: 100%;
 }
 
-.btn-back {
-  background-color: #e0e0e0;
-  color: #333;
-  padding: 10px 16px;
-  margin-bottom: 24px;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
+.premium-detail-card {
+  border-radius: 24px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
 }
 
-.btn-back:hover {
-  background-color: #d0d0d0;
-  transform: translateX(-2px);
+.side-card {
+  border-radius: 20px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
 }
 
-.detail-container {
-  max-width: 800px;
-  margin: 0 auto;
+.border-bottom {
+  border-bottom: 1px solid #f1f5f9;
 }
 
-.detail-header {
-  border-bottom: 2px solid #f0f0f0;
-  padding-bottom: 20px;
-  margin-bottom: 30px;
-}
-
-.detail-header h1 {
-  color: #333;
-  font-size: 32px;
-  margin-bottom: 12px;
-}
-
-.detail-id {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #666;
-  font-size: 14px;
-}
-
-.detail-id code {
-  background-color: #f5f5f5;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  color: #e74c3c;
-}
-
-.detail-content {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-section h2 {
-  font-size: 18px;
-  color: #333;
-  margin-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 10px;
-}
-
-.description-section .description {
-  color: #555;
+.lh-relaxed {
   line-height: 1.6;
-  font-size: 16px;
 }
 
-.no-description {
-  color: #999;
-  font-style: italic;
-  font-size: 14px;
+.text-mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 }
 
-.connector-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
 }
 
-.connector-loading {
-  padding: 20px;
-  text-align: center;
-  color: #999;
-  font-size: 14px;
-}
-
-.connector-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.ga4-premium-widget {
+  background: #f8fafc;
+  border-radius: 16px;
   padding: 16px;
-  background-color: #f9f9f9;
-  border: 2px solid #4a90e2;
-  border-radius: 8px;
-  text-decoration: none;
-  color: #333;
-  transition: all 0.3s ease;
+  border: 1px solid #f1f5f9;
+}
+
+.border-dashed {
+  border: 2px dashed #e2e8f0 !important;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.connector-link:hover {
-  background-color: #f0f7ff;
-  transform: translateX(4px);
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.2);
+.border-dashed:hover {
+  background: #f1f5f9 !important;
+  border-color: #6366f1 !important;
 }
 
-.connector-icon {
-  font-size: 24px;
+.custom-snackbar :deep(.v-snackbar__wrapper) {
+  border-radius: 12px !important;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.1);
 }
 
-.connector-name {
-  flex: 1;
-  font-weight: 500;
-  font-size: 16px;
+.tracking-tight {
+  letter-spacing: -0.025em;
 }
 
-.external-icon {
-  color: #4a90e2;
-  font-size: 14px;
-}
-
-.connector-connected {
-  background-color: #f0f7ff;
-  border: 2px solid #4a90e2;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.connection-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.status-indicator {
-  font-size: 10px;
-}
-
-.status-indicator.connected {
-  color: #2e7d32;
-  font-size: 16px;
-}
-
-.status-indicator.expired {
-  color: #e65100;
-  font-size: 16px;
-}
-
-.connection-header h3 {
-  margin: 0;
-  font-size: 16px;
-  color: #333;
-}
-
-.connection-details {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #d0e8ff;
-}
-
-.detail-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 14px;
-}
-
-.detail-item .label {
-  font-weight: 500;
-  color: #666;
-}
-
-.detail-item .value {
-  color: #333;
-  font-weight: 500;
-}
-
-.connector-actions {
-  display: flex;
+.gap-2 {
   gap: 8px;
-}
-
-.actions-section {
-  display: flex;
-  gap: 12px;
-  padding-top: 20px;
-  border-top: 1px solid #f0f0f0;
-}
-
-.btn {
-  padding: 12px 24px;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  flex: 1;
-}
-
-.btn-sm {
-  padding: 8px 16px;
-  font-size: 13px;
-  flex: auto;
-}
-
-.btn-primary {
-  background-color: #4a90e2;
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: #357abd;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
-}
-
-.btn-danger {
-  background-color: #e74c3c;
-  color: white;
-}
-
-.btn-danger:hover {
-  background-color: #c0392b;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(231, 76, 60, 0.3);
-}
-
-.error-message {
-  padding: 12px;
-  background-color: #ffe0e0;
-  color: #e74c3c;
-  border-radius: 4px;
-  margin-top: 16px;
-  font-size: 14px;
-}
-
-.loading {
-  text-align: center;
-  padding: 60px 20px;
-  color: #666;
-  font-size: 16px;
-}
-
-@media (max-width: 640px) {
-  .project-detail {
-    padding: 16px;
-  }
-
-  .detail-header h1 {
-    font-size: 24px;
-  }
-
-  .detail-content {
-    gap: 20px;
-  }
-
-  .actions-section {
-    flex-direction: column;
-  }
 }
 </style>

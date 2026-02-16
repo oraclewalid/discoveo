@@ -19,6 +19,8 @@ pub struct AppState {
     pub oauth_client: Arc<BasicClient>,
     pub connector_repo: ConnectorRepository,
     pub project_repo: ProjectRepository,
+    pub frontend_url: String,
+    pub duckdb_base_path: String,
 }
 
 async fn health() -> &'static str {
@@ -68,10 +70,17 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let frontend_url =
+        std::env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let duckdb_base_path =
+        std::env::var("DUCKDB_BASE_PATH").unwrap_or_else(|_| "/tmp/ga4_data".to_string());
+
     let state = AppState {
         oauth_client: Arc::new(create_oauth_client()),
         connector_repo: ConnectorRepository::new(pool.clone()),
         project_repo: ProjectRepository::new(pool),
+        frontend_url,
+        duckdb_base_path,
     };
 
     let app = Router::new()

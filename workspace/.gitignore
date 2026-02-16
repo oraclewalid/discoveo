@@ -42,3 +42,7 @@ __screenshots__/
 .editorconfig
 .oxlintrc.json
 .rl4/
+# RL4 MCP config (contains auth tokens — do not commit)
+.cursor/mcp.json
+.vscode/mcp.json
+.mcp.json

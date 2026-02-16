@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use super::ga4_service::GA4Record;
 
-const DATA_DIR: &str = "/tmp/ga4_data";
 const LOOKBACK_DAYS: i64 = 2;
 const DEFAULT_BACKFILL_DAYS: i64 = 30;
 
@@ -19,6 +18,7 @@ pub struct StorageResult {
 }
 
 pub fn store(
+    base_path: &str,
     project_id: Uuid,
     connector_id: Uuid,
     records: Vec<GA4Record>,
@@ -39,7 +39,7 @@ pub fn store(
         });
     }
 
-    let dir = data_dir(project_id, connector_id);
+    let dir = data_dir(base_path, project_id, connector_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create directory: {}", e))?;
 
     let db_path = dir.join("ga4.duckdb");
@@ -106,8 +106,8 @@ pub fn store(
     })
 }
 
-fn data_dir(project_id: Uuid, connector_id: Uuid) -> PathBuf {
-    PathBuf::from(DATA_DIR)
+fn data_dir(base_path: &str, project_id: Uuid, connector_id: Uuid) -> PathBuf {
+    PathBuf::from(base_path)
         .join(project_id.to_string())
         .join(connector_id.to_string())
 }
@@ -212,13 +212,14 @@ fn upsert(conn: &Connection, records: &[GA4Record]) -> Result<(usize, usize), St
 /// Get the start date for incremental sync.
 /// Returns max_date - LOOKBACK_DAYS if data exists, otherwise today - DEFAULT_BACKFILL_DAYS.
 pub fn get_incremental_start_date(
+    base_path: &str,
     project_id: Uuid,
     connector_id: Uuid,
 ) -> NaiveDate {
     let today = chrono::Utc::now().date_naive();
     let default_start = today - chrono::Duration::days(DEFAULT_BACKFILL_DAYS);
 
-    let db_path = data_dir(project_id, connector_id).join("ga4.duckdb");
+    let db_path = data_dir(base_path, project_id, connector_id).join("ga4.duckdb");
 
     if !db_path.exists() {
         info!("No existing data, using default backfill of {} days", DEFAULT_BACKFILL_DAYS);

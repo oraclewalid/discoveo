@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-const DATA_DIR: &str = "/tmp/ga4_data";
-
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FunnelDimension {
@@ -46,21 +44,22 @@ pub struct FunnelStage {
     pub ranking: i64,
 }
 
-fn db_path(project_id: Uuid, connector_id: Uuid) -> PathBuf {
-    PathBuf::from(DATA_DIR)
+fn db_path(base_path: &str, project_id: Uuid, connector_id: Uuid) -> PathBuf {
+    PathBuf::from(base_path)
         .join(project_id.to_string())
         .join(connector_id.to_string())
         .join("ga4.duckdb")
 }
 
 pub fn query_funnel(
+    base_path: &str,
     project_id: Uuid,
     connector_id: Uuid,
     dimension: FunnelDimension,
     start_date: &str,
     end_date: &str,
 ) -> Result<Vec<FunnelStage>, String> {
-    let path = db_path(project_id, connector_id);
+    let path = db_path(base_path, project_id, connector_id);
     if !path.exists() {
         return Err("No data available. Pull GA4 data first.".to_string());
     }
