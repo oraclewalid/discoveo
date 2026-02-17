@@ -21,9 +21,9 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "rus
 chrono = { version = "0.4", features = ["serde"] }
 
 # Vector embeddings
-# Using latest stable version with proper TLS defaults
-fastembed = "5.9"
-pgvector = { version = "0.3", features = ["sqlx"] }
+# Using older fastembed version with better Intel Mac support
+fastembed = "4"
+pgvector = { version = "0.4", features = ["sqlx"] }
 
 # Tracing
 tracing = "0.1"

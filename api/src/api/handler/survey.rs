@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
 };
 use chrono::{NaiveDate, NaiveDateTime};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::{info, instrument, warn};
 use uuid::Uuid;
@@ -174,6 +174,9 @@ async fn upload_survey(
             ratings,
             comments: get(idx_comments),
             raw: Value::Object(raw),
+            comment_embedding: None,
+            embedding_status: None,
+            embedding_generated_at: None,
         });
     }
 
@@ -311,7 +314,7 @@ async fn get_embedding_status(
         .ok_or_else(|| AppError::not_found("Project not found"))?;
 
     // Query status counts
-    let stats = sqlx::query!(
+    let row = sqlx::query(
         r#"
         SELECT
             COUNT(*) as total,
@@ -322,18 +325,19 @@ async fn get_embedding_status(
         FROM survey_responses
         WHERE project_id = $1
         "#,
-        project_id
     )
+    .bind(project_id)
     .fetch_one(&state.pool)
     .await
     .map_err(AppError::from)?;
 
+    use sqlx::Row;
     Ok(Json(EmbeddingStatusResponse {
-        total_responses: stats.total.unwrap_or(0),
-        pending: stats.pending.unwrap_or(0),
-        completed: stats.completed.unwrap_or(0),
-        failed: stats.failed.unwrap_or(0),
-        skipped: stats.skipped.unwrap_or(0),
+        total_responses: row.try_get::<i64, _>("total").unwrap_or(0),
+        pending: row.try_get::<i64, _>("pending").unwrap_or(0),
+        completed: row.try_get::<i64, _>("completed").unwrap_or(0),
+        failed: row.try_get::<i64, _>("failed").unwrap_or(0),
+        skipped: row.try_get::<i64, _>("skipped").unwrap_or(0),
     }))
 }
 

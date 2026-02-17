@@ -19,7 +19,7 @@ pub struct SurveyResponse {
     pub raw: JsonValue,
 
     // Embedding fields
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip)]
     pub comment_embedding: Option<Vector>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embedding_status: Option<String>,

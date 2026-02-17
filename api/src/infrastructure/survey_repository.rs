@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use pgvector::Vector;
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::models::survey::{SimilarComment, SurveyResponse, SurveyStats};
