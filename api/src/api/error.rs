@@ -54,6 +54,7 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        tracing::error!(status = %self.status, error = %self.message, "Request failed");
         (self.status, Json(ErrorResponse { error: self.message })).into_response()
     }
 }

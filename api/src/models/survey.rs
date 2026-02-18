@@ -41,3 +41,13 @@ pub struct SimilarComment {
     pub response: SurveyResponse,
     pub similarity: f64,
 }
+
+#[derive(Debug, Clone)]
+pub struct CommentForAnalysis {
+    pub comments: String,
+    pub ratings: Option<f64>,
+    pub date: Option<NaiveDateTime>,
+    pub country: Option<String>,
+    pub device: Option<String>,
+    pub url: Option<String>,
+}

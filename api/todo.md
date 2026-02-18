@@ -44,3 +44,47 @@
     This is a different API from the Admin API you already enabled. You need both:
     1. ✅ Analytics Admin API (for listing properties) - already enabled
     2. ❌ Analytics Data API (for running reports) - needs to be enabled
+    
+    
+Current cost drivers
+
+  1. Model: Claude Sonnet on Bedrock — not cheap, especially at scale
+  2. All 500 comments sent every time — the full text of every comment goes into the prompt as input tokens
+  3. Cache is invalidated when comment count changes — any new survey response triggers a full re-analysis
+  4. Rich metadata per comment (rating, country, device, date, URL) inflates token count
+
+  Optimization strategies (leveraging your existing embeddings)
+
+  Here are the main approaches, from most impactful to least:
+
+  1. Pre-cluster with embeddings, send summaries instead of raw comments
+
+  Since you already have embeddings in pgvector, you can cluster comments using k-means or DBSCAN on the embeddings, then send cluster
+  summaries (centroid representative quotes + count) to Claude instead of all 500 raw comments. This could reduce input tokens by 5-10x.
+
+  Flow: embeddings → cluster in SQL/Rust → pick 2-3 representative comments per cluster → send ~30-50 comments instead of 500
+
+  2. Use Haiku instead of Sonnet
+
+  For structured analysis like sentiment/themes extraction, Haiku is significantly cheaper (~10-20x) and performs well on this kind of task.
+  The output schema is well-defined, so a smaller model handles it fine.
+
+  3. Two-pass approach: Haiku for per-comment classification, then aggregate without LLM
+
+  - Pass 1 (cheap, or even free): Use embeddings to cluster comments into themes. Use cosine similarity to assign sentiment labels based on a
+   few labeled examples.
+  - Pass 2: Only call Claude for the narrative summary and recommendations, passing in the pre-computed stats (theme counts, sentiment %, top
+   quotes) rather than raw comments.
+
+  This way Claude gets a ~500 token summary instead of ~10k+ tokens of raw comments.
+
+  4. Smarter cache invalidation
+
+  Currently the cache invalidates when response_count changes (any new comment). Instead:
+  - Use a threshold (e.g., invalidate only when 10%+ new comments arrive)
+  - Or use a time-based TTL regardless of count (24h is already there, but it's AND'd with count)
+
+  5. Batch prompt caching (Bedrock)
+
+  Bedrock supports prompt caching for the Anthropic API. Your system prompt is static — marking it as cacheable would save re-processing it
+  on every call.

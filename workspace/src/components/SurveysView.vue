@@ -1,332 +1,346 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import Papa from 'papaparse'
-import config from '@/config'
 import qualitativeService from '@/services/qualitativeService'
-import type { SurveyStats } from '@/types/analytics'
+import type { SurveyStats, SurveyReport } from '@/types/analytics'
 
 const props = defineProps<{
   projectId: string
 }>()
 
-const file = ref<File | null>(null)
-const isUploading = ref(false)
-const uploadStatus = ref<{ type: 'success' | 'error'; message: string } | null>(null)
-const dragOver = ref(false)
-
-const REQUIRED_HEADERS = [
-  'Date',
-  'Country',
-  'URL',
-  'Device',
-  'Browser',
-  'OS',
-  'Ratings',
-  'Comments'
-]
-
-const validateCSV = (selectedFile: File) => {
-  return new Promise<{ isValid: boolean; error?: string }>((resolve) => {
-    Papa.parse(selectedFile, {
-      preview: 1, // Read only the first row (headers)
-      header: false,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (results.errors.length > 0) {
-          resolve({ isValid: false, error: 'CSV parsing error. Please check the file formatting.' })
-          return
-        }
-
-        const headers = results.data[0] as string[]
-        if (!headers || headers.length === 0) {
-          resolve({ isValid: false, error: 'The CSV file appears to be empty.' })
-          return
-        }
-
-        // Check for missing headers
-        const missingHeaders = REQUIRED_HEADERS.filter(
-          (required) => !headers.some(h => h.trim().toLowerCase() === required.toLowerCase())
-        )
-
-        if (missingHeaders.length > 0) {
-          resolve({ 
-            isValid: false, 
-            error: `Missing required columns: ${missingHeaders.join(', ')}` 
-          })
-        } else {
-          resolve({ isValid: true })
-        }
-      },
-      error: (err) => {
-        resolve({ isValid: false, error: `Error reading file: ${err.message}` })
-      }
-    })
-  })
-}
-
-const handleFileSelect = async (event: Event) => {
-  const target = event.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
-    const selectedFile = target.files[0]
-    await processFile(selectedFile)
-  }
-}
-
-const handleDrop = async (event: DragEvent) => {
-  dragOver.value = false
-  if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
-    const droppedFile = event.dataTransfer.files[0]
-    await processFile(droppedFile)
-  }
-}
-
-const processFile = async (selectedFile: File) => {
-  uploadStatus.value = null
-  
-  if (selectedFile.type !== 'text/csv' && !selectedFile.name.endsWith('.csv')) {
-    uploadStatus.value = { type: 'error', message: 'Please select a valid CSV file.' }
-    file.value = null
-    return
-  }
-
-  const validation = await validateCSV(selectedFile)
-  if (!validation.isValid) {
-    uploadStatus.value = { type: 'error', message: validation.error || 'Invalid CSV format.' }
-    file.value = null
-  } else {
-    file.value = selectedFile
-  }
-}
-
-const uploadFile = async () => {
-  if (!file.value) return
-
-  isUploading.value = true
-  uploadStatus.value = null
-
-  const formData = new FormData()
-  formData.append('file', file.value)
-
-  try {
-    const response = await fetch(`${config.api.baseUrl}projects/${props.projectId}/qualitative/surveys`, {
-      method: 'POST',
-      body: formData,
-      // Note: Don't set Content-Type header when using FormData, 
-      // the browser will set it with the correct boundary
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null)
-      throw new Error(errorData?.error || errorData?.message || `Upload failed: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-    uploadStatus.value = { 
-      type: 'success', 
-      message: `Successfully uploaded ${result.row_count} survey rows!` 
-    }
-    file.value = null
-  } catch (error) {
-    console.error('Upload error:', error)
-    uploadStatus.value = { 
-      type: 'error', 
-      message: error instanceof Error ? error.message : 'An error occurred during upload.' 
-    }
-  } finally {
-    isUploading.value = false
-  }
-}
-
 const stats = ref<SurveyStats | null>(null)
-const isLoadingStats = ref(false)
+const report = ref<SurveyReport | null>(null)
+const isLoading = ref(false)
 
-const loadStats = async () => {
-  isLoadingStats.value = true
+const loadData = async () => {
+  isLoading.value = true
   try {
-    stats.value = await qualitativeService.getSurveyStats(props.projectId)
+    const [statsRes, reportRes] = await Promise.all([
+      qualitativeService.getSurveyStats(props.projectId),
+      qualitativeService.getSurveyFeedback(props.projectId)
+    ])
+    stats.value = statsRes
+    report.value = reportRes
   } catch (error) {
-    console.error('Failed to load survey stats:', error)
+    console.error('Failed to load qualitative report:', error)
   } finally {
-    isLoadingStats.value = false
+    isLoading.value = false
   }
-}
-
-const clearFile = () => {
-  file.value = null
-  uploadStatus.value = null
 }
 
 const formatDate = (dateString?: string) => {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
+    month: 'short', day: 'numeric', year: 'numeric'
   })
 }
 
+const getSentimentColor = (sentiment: string) => {
+  switch (sentiment) {
+    case 'positive': return 'success'
+    case 'negative': return 'error'
+    case 'mixed': return 'warning'
+    default: return 'grey'
+  }
+}
+
+const getSeverityColor = (severity: string) => {
+  switch (severity) {
+    case 'critical': return 'error'
+    case 'major': return 'warning'
+    case 'minor': return 'info'
+    default: return 'grey'
+  }
+}
+
+const getPriorityColor = (priority: string) => {
+  switch (priority) {
+    case 'high': return 'error'
+    case 'medium': return 'warning'
+    case 'low': return 'info'
+    default: return 'grey'
+  }
+}
+
+const isExporting = ref(false)
+const reportContent = ref<HTMLElement | null>(null)
+
+const loadScript = (src: string) => {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve(true);
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = () => resolve(true);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+};
+
+const exportToPDF = async () => {
+  if (!report.value || isExporting.value) return;
+  
+  isExporting.value = true;
+  try {
+    // Load dependencies from CDN
+    await Promise.all([
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+      loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+    ]);
+
+    const element = reportContent.value;
+    if (!element) return;
+
+    // @ts-ignore
+    const { jsPDF } = window.jspdf;
+    // @ts-ignore
+    const canvas = await html2canvas(element, {
+      scale: 2, // Higher quality
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#f8fafc' // Match the background
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'px',
+      format: [canvas.width, canvas.height]
+    });
+
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.save(`Qualitative_Insights_${props.projectId}_${new Date().toISOString().split('T')[0]}.pdf`);
+  } catch (error) {
+    console.error('PDF Export failed:', error);
+    // Fallback to print if CDN fails
+    window.print();
+  } finally {
+    isExporting.value = false;
+  }
+}
+
 onMounted(() => {
-  loadStats()
+  loadData()
 })
 
-watch(() => props.projectId, () => loadStats())
+watch(() => props.projectId, () => loadData())
 </script>
 
 <template>
   <div class="surveys-view">
-    <div class="mb-8">
-      <h1 class="text-h3 font-weight-bold tracking-tight mb-2">Qualitative Data</h1>
-      <p class="text-subtitle-1 text-grey-darken-1">Upload surveys, interviews, and usability test results</p>
+    <div class="d-flex align-center justify-space-between mb-8 no-print">
+      <div>
+        <h1 class="text-h3 font-weight-bold tracking-tight mb-2">Qualitative Insights</h1>
+        <p class="text-subtitle-1 text-grey-darken-1">AI-powered analysis of your customer feedback</p>
+      </div>
+      <div class="d-flex gap-2">
+        <v-btn
+          color="secondary"
+          prepend-icon="mdi-file-pdf-box"
+          variant="outlined"
+          rounded="lg"
+          class="mr-2"
+          :loading="isExporting"
+          @click="exportToPDF"
+        >
+          Download PDF
+        </v-btn>
+        <v-btn color="primary" prepend-icon="mdi-upload" variant="flat" rounded="lg" @click="$emit('go-to-upload')">
+          Upload New Data
+        </v-btn>
+      </div>
     </div>
 
-    <!-- Stats Summary Section -->
-    <v-row v-if="stats" class="mb-8">
-      <v-col cols="12" sm="6" md="3">
-        <v-card class="stat-card" elevation="0">
-          <v-card-text>
-            <div class="d-flex align-center mb-2">
-              <v-avatar color="primary-lighten-5" size="32" class="mr-2">
-                <v-icon icon="mdi-poll" color="primary" size="18" />
+    <!-- Wrap content in a ref for PDF exporting -->
+    <div ref="reportContent" class="report-container pa-6 bg-white rounded-xl shadow-sm mt-4">
+      <!-- Print-only header (also used for PDF export capture) -->
+      <div v-if="report" class="mb-8 border-b-sm pb-4">
+        <h1 class="text-h4 font-weight-bold tracking-tight mb-2">Qualitative Insights Report</h1>
+        <p class="text-subtitle-1 text-grey">Generated by Discoveo AI Analysis • {{ report.project_id }}</p>
+      </div>
+
+      <template v-if="isLoading && !report">
+        <v-row>
+          <v-col cols="12" class="text-center pa-13">
+            <v-progress-circular indeterminate color="primary" size="64" />
+            <div class="mt-4 text-grey">Analyzing qualitative data...</div>
+          </v-col>
+        </v-row>
+      </template>
+
+      <template v-else-if="report">
+        <!-- Narrative Overview -->
+        <v-card class="narrative-card mb-8 px-6 py-4" elevation="0">
+          <v-row align="center">
+            <v-col cols="12" md="1" class="text-center">
+              <v-avatar color="primary-lighten-5" size="64">
+                <v-icon icon="mdi-robot-outline" color="primary" size="32" />
               </v-avatar>
-              <span class="text-caption font-weight-bold text-grey">TOTAL RESPONSES</span>
-            </div>
-            <div class="text-h4 font-weight-bold">{{ stats.total_responses.toLocaleString() }}</div>
-          </v-card-text>
+            </v-col>
+            <v-col cols="12" md="11">
+              <h3 class="text-h6 font-weight-bold mb-1">Executive Summary</h3>
+              <p class="text-body-1 text-grey-darken-3 mb-0 italic-narrative">"{{ report.narrative }}"</p>
+              <div class="text-caption text-grey mt-2">
+                Analyzed by {{ report.model_used }} on {{ formatDate(report.created_at) }}
+              </div>
+            </v-col>
+          </v-row>
         </v-card>
-      </v-col>
 
-      <v-col cols="12" sm="6" md="3">
-        <v-card class="stat-card" elevation="0">
-          <v-card-text>
-            <div class="d-flex align-center mb-2">
-              <v-avatar color="warning-lighten-5" size="32" class="mr-2">
-                <v-icon icon="mdi-star" color="warning" size="18" />
-              </v-avatar>
-              <span class="text-caption font-weight-bold text-grey">AVG. RATING</span>
-            </div>
-            <div class="text-h4 font-weight-bold">
-              {{ stats.average_rating.toFixed(2) }}
-              <span class="text-body-2 text-grey font-weight-medium">/ 5</span>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-
-      <v-col cols="12" sm="6" md="3">
-        <v-card class="stat-card" elevation="0">
-          <v-card-text>
-            <div class="d-flex align-center mb-2">
-              <v-avatar color="info-lighten-5" size="32" class="mr-2">
-                <v-icon icon="mdi-comment-text-multiple" color="info" size="18" />
-              </v-avatar>
-              <span class="text-caption font-weight-bold text-grey">WITH COMMENTS</span>
-            </div>
-            <div class="text-h4 font-weight-bold">{{ stats.responses_with_comments.toLocaleString() }}</div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-
-      <v-col cols="12" sm="6" md="3">
-        <v-card class="stat-card" elevation="0">
-          <v-card-text>
-            <div class="d-flex align-center mb-2">
-              <v-avatar color="success-lighten-5" size="32" class="mr-2">
-                <v-icon icon="mdi-calendar-range" color="success" size="18" />
-              </v-avatar>
-              <span class="text-caption font-weight-bold text-grey">DATE RANGE</span>
-            </div>
-            <div class="text-subtitle-1 font-weight-bold lh-1 mt-1">
-              {{ formatDate(stats.first_response_date) }} -<br>
-              {{ formatDate(stats.last_response_date) }}
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-
-    <v-row justify="center">
-      <v-col cols="12" md="8" lg="6">
-        <v-card class="premium-upload-card" elevation="0">
-          <v-card-text class="pa-10">
-            <div 
-              class="upload-zone"
-              :class="{ 'drag-over': dragOver }"
-              @dragover.prevent="dragOver = true"
-              @dragleave.prevent="dragOver = false"
-              @drop.prevent="handleDrop"
-              @click="$refs.fileInput.click()"
-            >
-              <input 
-                type="file" 
-                ref="fileInput" 
-                class="d-none" 
-                accept=".csv"
-                @change="handleFileSelect"
-              >
-              
-              <v-avatar color="primary-lighten-5" size="100" class="mb-6">
-                <v-icon icon="mdi-cloud-upload-outline" color="primary" size="48" />
-              </v-avatar>
-
-              <template v-if="!file">
-                <h2 class="text-h5 font-weight-bold mb-2">Click or drag to upload</h2>
-                <p class="text-body-1 text-grey">Support for .csv files only</p>
-              </template>
-              
-              <template v-else>
-                <div class="d-flex align-center bg-white pa-4 rounded-xl border mb-4 shadow-sm w-100">
-                  <v-icon icon="mdi-file-delimited-outline" color="primary" class="mr-4" size="32" />
-                  <div class="text-left flex-grow-1 overflow-hidden">
-                    <div class="text-subtitle-1 font-weight-bold text-truncate">{{ file.name }}</div>
-                    <div class="text-caption text-grey">{{ (file.size / 1024).toFixed(1) }} KB</div>
+        <!-- Sentiment & Stats -->
+        <v-row class="mb-8">
+          <v-col cols="12" md="4">
+            <v-card class="insight-card h-100" elevation="0">
+              <v-card-title class="px-6 pt-6">Sentiment Distribution</v-card-title>
+              <v-card-text class="px-6 pb-6 pt-2">
+                <div class="mb-4">
+                  <div class="d-flex justify-space-between text-caption font-weight-bold mb-1">
+                    <span>POSITIVE</span>
+                    <span>{{ report.analysis.sentiment_breakdown.positive_pct }}%</span>
                   </div>
-                  <v-btn icon="mdi-close" variant="text" size="small" color="grey" @click.stop="clearFile" />
+                  <v-progress-linear :model-value="report.analysis.sentiment_breakdown.positive_pct" color="success" height="10" rounded />
                 </div>
-              </template>
-            </div>
+                <div class="mb-4">
+                  <div class="d-flex justify-space-between text-caption font-weight-bold mb-1">
+                    <span>NEGATIVE</span>
+                    <span>{{ report.analysis.sentiment_breakdown.negative_pct }}%</span>
+                  </div>
+                  <v-progress-linear :model-value="report.analysis.sentiment_breakdown.negative_pct" color="error" height="10" rounded />
+                </div>
+                <div>
+                  <div class="d-flex justify-space-between text-caption font-weight-bold mb-1">
+                    <span>NEUTRAL</span>
+                    <span>{{ report.analysis.sentiment_breakdown.neutral_pct }}%</span>
+                  </div>
+                  <v-progress-linear :model-value="report.analysis.sentiment_breakdown.neutral_pct" color="info" height="10" rounded />
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
 
-            <v-alert
-              v-if="uploadStatus"
-              :type="uploadStatus.type"
-              variant="tonal"
-              closable
-              class="mt-6 rounded-xl"
-              @click:close="uploadStatus = null"
-            >
-              {{ uploadStatus.message }}
-            </v-alert>
+          <v-col v-for="stat in [
+            { label: 'TOTAL RESPONSES', value: stats?.total_responses, icon: 'mdi-poll', color: 'primary' },
+            { label: 'AVG. RATING', value: stats?.average_rating?.toFixed(2), icon: 'mdi-star', color: 'warning', suffix: '/ 5' }
+          ]" :key="stat.label" cols="12" md="4">
+            <v-card class="stat-card h-100" elevation="0">
+              <v-card-text class="pa-8 text-center">
+                <v-avatar :color="`${stat.color}-lighten-5`" size="64" class="mb-4">
+                  <v-icon :icon="stat.icon" :color="stat.color" size="32" />
+                </v-avatar>
+                <div class="text-caption font-weight-bold text-grey">{{ stat.label }}</div>
+                <div class="text-h3 font-weight-bold">
+                  {{ stat.value }}
+                  <span v-if="stat.suffix" class="text-body-1 text-grey">{{ stat.suffix }}</span>
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
 
-            <div class="mt-8">
-              <v-btn
-                block
-                color="primary"
-                size="x-large"
-                class="rounded-xl font-weight-bold elevation-4"
-                :disabled="!file"
-                :loading="isUploading"
-                @click="uploadFile"
-              >
-                Upload Survey Data
+        <!-- Key Issues -->
+        <div class="mb-6">
+          <h2 class="text-h5 font-weight-bold mb-4 d-flex align-center">
+            <v-icon icon="mdi-alert-octagon-outline" color="error" class="mr-2" />
+            Critical Issues & Pain Points
+          </h2>
+          <v-row>
+            <v-col v-for="issue in report.analysis.key_issues" :key="issue.title" cols="12" md="6">
+              <v-card :class="`issue-card issue-${issue.severity}`" elevation="0">
+                <v-card-item>
+                  <template v-slot:prepend>
+                    <v-chip :color="getSeverityColor(issue.severity)" size="small" class="text-uppercase font-weight-bold mr-2">
+                      {{ issue.severity }}
+                    </v-chip>
+                  </template>
+                  <v-card-title class="text-subtitle-1 font-weight-bold">{{ issue.title }}</v-card-title>
+                  <template v-slot:append>
+                    <div class="text-caption font-weight-bold text-grey">
+                      {{ issue.affected_users_pct }}% affected
+                    </div>
+                  </template>
+                </v-card-item>
+                <v-card-text class="pb-4">
+                  {{ issue.description }}
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </div>
+
+        <!-- Themes -->
+        <div class="mb-10">
+          <h2 class="text-h5 font-weight-bold mb-4 d-flex align-center">
+            <v-icon icon="mdi-message-draw" color="primary" class="mr-2" />
+            Recurring Themes
+          </h2>
+          <v-row>
+            <v-col v-for="theme in report.analysis.themes" :key="theme.name" cols="12" md="6" lg="4">
+              <v-card class="theme-card h-100" elevation="0">
+                <v-card-item>
+                  <v-card-title class="text-subtitle-1 font-weight-bold">{{ theme.name }}</v-card-title>
+                  <template v-slot:append>
+                    <v-chip :color="getSentimentColor(theme.sentiment)" size="x-small" variant="flat">
+                      {{ theme.sentiment }}
+                    </v-chip>
+                  </template>
+                </v-card-item>
+                <v-card-text>
+                  <p class="text-body-2 mb-4">{{ theme.description }}</p>
+                  <div class="quotes-container">
+                    <div v-for="(quote, i) in theme.sample_quotes" :key="i" class="quote text-caption italic text-grey-darken-2">
+                      "{{ quote }}"
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </div>
+
+        <!-- Recommendations -->
+        <div>
+          <h2 class="text-h5 font-weight-bold mb-4 d-flex align-center">
+            <v-icon icon="mdi-lightbulb-on-outline" color="success" class="mr-2" />
+            Recommended Actions
+          </h2>
+          <v-row>
+            <v-col v-for="rec in report.analysis.recommendations" :key="rec.title" cols="12">
+              <v-card class="recommendation-card" elevation="0">
+                <v-row no-gutters>
+                  <v-col cols="12" md="9" class="pa-6">
+                    <div class="d-flex align-center mb-2">
+                      <v-chip :color="getPriorityColor(rec.priority)" size="small" label class="mr-3 font-weight-bold text-uppercase">
+                        {{ rec.priority }} Priority
+                      </v-chip>
+                      <h3 class="text-h6 font-weight-bold">{{ rec.title }}</h3>
+                    </div>
+                    <p class="text-body-2 text-grey-darken-3 mb-0">{{ rec.description }}</p>
+                  </v-col>
+                  <v-divider :vertical="!$vuetify.display.smAndDown" />
+                  <v-col cols="12" md="3" class="pa-6 bg-grey-lighten-5">
+                    <div class="text-caption font-weight-bold text-grey mb-1">EXPECTED IMPACT</div>
+                    <div class="text-body-2 font-weight-bold text-success">{{ rec.expected_impact }}</div>
+                  </v-col>
+                </v-row>
+              </v-card>
+            </v-col>
+          </v-row>
+        </div>
+      </template>
+
+      <template v-else>
+        <v-row>
+          <v-col cols="12">
+            <v-card class="pa-13 text-center rounded-xl border-dashed" variant="outlined" color="primary">
+              <v-icon icon="mdi-auto-fix" size="64" class="mb-4" />
+              <h2 class="text-h5 font-weight-bold">No Analysis Available</h2>
+              <p class="text-body-1 text-grey mb-6">Upload qualitative data to generate AI-powered insights and recommendations.</p>
+              <v-btn color="primary" size="large" prepend-icon="mdi-upload" @click="$emit('go-to-upload')">
+                Get Started with Upload
               </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <v-card class="mt-8 side-card" elevation="0">
-          <v-card-title class="pa-6 border-bottom">
-            <span class="text-h6 font-weight-bold">CSV Template Guide</span>
-          </v-card-title>
-          <v-card-text class="pa-6">
-            <p class="text-body-2 text-grey-darken-1 mb-4">
-              To ensure proper processing, please make sure your CSV includes the following headers:
-            </p>
-            <v-chip-group>
-              <v-chip v-for="header in REQUIRED_HEADERS" :key="header" size="small" variant="tonal" border>{{ header }}</v-chip>
-            </v-chip-group>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
+            </v-card>
+          </v-col>
+        </v-row>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -335,60 +349,134 @@ watch(() => props.projectId, () => loadStats())
   width: 100%;
 }
 
-.premium-upload-card {
-  border-radius: 32px !important;
-  border: 1px solid #e2e8f0 !important;
-  background: white !important;
-}
-
-.upload-zone {
-  border: 2px dashed #e2e8f0;
-  border-radius: 24px;
-  padding: 60px 40px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background: #f8fafc;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.upload-zone:hover, .upload-zone.drag-over {
-  border-color: #6366f1;
-  background: #f1f5f9;
-}
-
-.upload-zone.drag-over {
-  transform: scale(1.02);
-}
-
-.side-card {
-  border-radius: 20px !important;
-  border: 1px solid #e2e8f0 !important;
-  background: white !important;
-}
-
-.border-bottom {
-  border-bottom: 1px solid #f1f5f9;
-}
-
 .tracking-tight {
   letter-spacing: -0.025em;
 }
 
-.stat-card {
+.narrative-card {
   border-radius: 20px !important;
   border: 1px solid #e2e8f0 !important;
   background: white !important;
-  height: 100%;
+  border-left: 6px solid #6366f1 !important;
 }
 
-.lh-1 {
-  line-height: 1.2 !important;
+.italic-narrative {
+  font-style: italic;
+  line-height: 1.6;
 }
 
-.text-grey-darken-1 {
-  color: #475569 !important;
+.stat-card, .insight-card, .theme-card {
+  border-radius: 20px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
+}
+
+.issue-card {
+  border-radius: 16px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
+}
+
+.issue-critical { border-left: 4px solid #ef4444 !important; }
+.issue-major { border-left: 4px solid #f59e0b !important; }
+.issue-minor { border-left: 4px solid #3b82f6 !important; }
+
+.theme-card {
+  transition: transform 0.2s;
+}
+
+.theme-card:hover {
+  transform: translateY(-5px);
+}
+
+.recommendation-card {
+  border-radius: 20px !important;
+  border: 1px solid #e2e8f0 !important;
+  background: white !important;
+  overflow: hidden;
+}
+
+.quotes-container {
+  border-left: 2px solid #f1f5f9;
+  padding-left: 12px;
+}
+
+.quote {
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.border-dashed {
+  border-style: dashed !important;
+}
+
+.text-success { color: #10b981 !important; }
+
+/* Print Styles */
+.print-only {
+  display: none;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+
+  /* Force hide all external navigation elements */
+  .v-navigation-drawer,
+  .v-app-bar,
+  .v-system-bar,
+  .v-bottom-navigation,
+  header,
+  aside,
+  nav,
+  .v-btn {
+    display: none !important;
+  }
+
+  /* Reset main content layout for full-page print */
+  .v-main {
+    padding: 0 !important;
+    margin: 0 !important;
+    --v-layout-left: 0px !important;
+    --v-layout-top: 0px !important;
+  }
+
+  .main-content {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  .v-main {
+    padding: 0 !important;
+  }
+
+  .surveys-view {
+    padding: 0 !important;
+  }
+
+  .v-container {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .insight-card, .stat-card, .issue-card, .theme-card, .recommendation-card, .narrative-card {
+    break-inside: avoid;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
+    margin-bottom: 20px !important;
+  }
+
+  body {
+    background: white !important;
+  }
 }
 </style>
+
+
+

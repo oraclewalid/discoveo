@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -22,7 +22,6 @@ const REQUIRED_COLUMNS: &[&str] = &[
     "Device",
     "Browser",
     "OS",
-    "Ratings",
     "Comments",
 ];
 
@@ -56,14 +55,24 @@ async fn upload_survey(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| AppError::bad_request(format!("Failed to read multipart field: {}", e)))?
+        .map_err(|e| {
+            warn!(error = %e, "Failed to read multipart field — possible body size limit exceeded");
+            AppError::bad_request(format!("Failed to read multipart field: {}", e))
+        })?
     {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
+            let content_type = field.content_type().map(|s| s.to_string());
+            let file_name = field.file_name().map(|s| s.to_string());
+            info!(field_name = %name, ?content_type, ?file_name, "Reading file field");
             let bytes = field
                 .bytes()
                 .await
-                .map_err(|e| AppError::bad_request(format!("Failed to read file: {}", e)))?;
+                .map_err(|e| {
+                    warn!(error = %e, "Failed to read file bytes — possible body size limit exceeded");
+                    AppError::bad_request(format!("Failed to read file: {}", e))
+                })?;
+            info!(file_size_bytes = bytes.len(), "File field read successfully");
             csv_bytes = Some(bytes.to_vec());
         }
     }
@@ -407,6 +416,7 @@ pub fn routes() -> Router<AppState> {
             "/projects/{project_id}/qualitative/surveys",
             post(upload_survey),
         )
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB limit for CSV uploads
         .route(
             "/projects/{project_id}/qualitative/stats",
             get(get_stats),

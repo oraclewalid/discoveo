@@ -6,6 +6,7 @@ import DashboardView from '@/components/DashboardView.vue';
 import FunnelsView from '@/components/FunnelsView.vue';
 import AIRecommendationView from '@/components/AIRecommendationView.vue';
 import SurveysView from '@/components/SurveysView.vue';
+import SurveyUploadView from '@/components/SurveyUploadView.vue';
 import ProjectList from '@/components/ProjectList.vue';
 import ProjectDetail from '@/components/ProjectDetail.vue';
 import ProjectForm from '@/components/ProjectForm.vue';
@@ -21,7 +22,7 @@ const userProfile = ref({
 });
 
 // Navigation State
-type View = 'overview' | 'funnels' | 'qualitative' | 'recommendations' | 'projects' | 'ga4-callback';
+type View = 'overview' | 'funnels' | 'qualitative' | 'qualitative-upload' | 'recommendations' | 'projects' | 'ga4-callback';
 const currentView = ref<View>('projects');
 const drawer = ref(true);
 const rail = ref(false);
@@ -207,15 +208,39 @@ const isProjectActive = computed(() => !!selectedProject.value);
           </template>
         </v-list-item>
 
-        <v-list-item
-          prepend-icon="mdi-comment-text-outline"
-          title="Qualitative Data"
-          value="qualitative"
-          :active="currentView === 'qualitative'"
-          @click="currentView = 'qualitative'"
-          rounded="lg"
-          class="mb-1"
-        />
+        <v-list-group value="qualitative">
+          <template v-slot:activator="{ props }">
+            <v-list-item
+              v-bind="props"
+              prepend-icon="mdi-comment-text-outline"
+              title="Qualitative Data"
+              rounded="lg"
+              class="mb-1"
+              :active="currentView === 'qualitative' || currentView === 'qualitative-upload'"
+              @click="currentView = 'qualitative'"
+            />
+          </template>
+
+          <v-list-item
+            prepend-icon="mdi-chart-box-outline"
+            title="Overview"
+            value="qualitative-overview"
+            :active="currentView === 'qualitative'"
+            @click="currentView = 'qualitative'"
+            rounded="lg"
+            class="mb-1"
+          />
+
+          <v-list-item
+            prepend-icon="mdi-upload-outline"
+            title="Upload CSV"
+            value="qualitative-upload"
+            :active="currentView === 'qualitative-upload'"
+            @click="currentView = 'qualitative-upload'"
+            rounded="lg"
+            class="mb-1"
+          />
+        </v-list-group>
 
         <v-list-item
           prepend-icon="mdi-auto-fix"
@@ -376,7 +401,12 @@ const isProjectActive = computed(() => !!selectedProject.value);
 
           <!-- Qualitative Data -->
           <div v-else-if="currentView === 'qualitative' && selectedProject" key="qualitative">
-            <SurveysView :project-id="selectedProject.id" />
+            <SurveysView :project-id="selectedProject.id" @go-to-upload="currentView = 'qualitative-upload'" />
+          </div>
+
+          <!-- Qualitative Upload -->
+          <div v-else-if="currentView === 'qualitative-upload' && selectedProject" key="qualitative-upload">
+            <SurveyUploadView :project-id="selectedProject.id" />
           </div>
 
           <!-- Recommendations -->

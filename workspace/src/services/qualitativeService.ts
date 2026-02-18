@@ -1,5 +1,5 @@
 import config from '@/config'
-import type { SurveyStats } from '@/types/analytics'
+import type { SurveyStats, SurveyReport } from '@/types/analytics'
 
 class QualitativeService {
   /**
@@ -21,6 +21,29 @@ class QualitativeService {
       return await response.json()
     } catch (error) {
       console.error('Get survey stats error:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Get survey analysis report for a project
+   */
+  async getSurveyFeedback(projectId: string): Promise<SurveyReport> {
+    try {
+      const response = await fetch(`${config.api.baseUrl}projects/${projectId}/qualitative/feedback`, {
+        method: 'POST',
+        headers: config.api.headers || {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch survey report: ${response.statusText}`)
+      }
+
+      return await response.json()
+    } catch (error) {
+      console.error('Get survey report error:', error)
       throw error
     }
   }

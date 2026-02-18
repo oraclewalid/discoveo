@@ -4,7 +4,7 @@ use serde_json::Value as JsonValue;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::models::survey::{SimilarComment, SurveyResponse, SurveyStats};
+use crate::models::survey::{CommentForAnalysis, SimilarComment, SurveyResponse, SurveyStats};
 
 #[derive(Clone)]
 pub struct SurveyRepository {
@@ -174,6 +174,47 @@ impl SurveyRepository {
         Ok(())
     }
 
+    /// Find all comments with metadata for LLM analysis (max 500, most recent first)
+    pub async fn find_all_comments(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Vec<CommentForAnalysis>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, CommentRow>(
+            r#"
+            SELECT comments, ratings, date, country, device, url
+            FROM survey_responses
+            WHERE project_id = $1
+              AND comments IS NOT NULL
+              AND comments != ''
+            ORDER BY date DESC NULLS LAST
+            LIMIT 500
+            "#,
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Count comments with non-empty text for a project
+    pub async fn count_comments(&self, project_id: Uuid) -> Result<i64, sqlx::Error> {
+        let row = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM survey_responses
+            WHERE project_id = $1
+              AND comments IS NOT NULL
+              AND comments != ''
+            "#,
+        )
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
     /// Find similar comments using cosine similarity
     pub async fn find_similar_comments(
         &self,
@@ -281,6 +322,29 @@ struct SurveyStatsRow {
     first_response_date: Option<NaiveDateTime>,
     last_response_date: Option<NaiveDateTime>,
     responses_with_comments: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CommentRow {
+    comments: Option<String>,
+    ratings: Option<f64>,
+    date: Option<NaiveDateTime>,
+    country: Option<String>,
+    device: Option<String>,
+    url: Option<String>,
+}
+
+impl From<CommentRow> for CommentForAnalysis {
+    fn from(row: CommentRow) -> Self {
+        CommentForAnalysis {
+            comments: row.comments.unwrap_or_default(),
+            ratings: row.ratings,
+            date: row.date,
+            country: row.country,
+            device: row.device,
+            url: row.url,
+        }
+    }
 }
 
 impl From<SurveyStatsRow> for SurveyStats {
