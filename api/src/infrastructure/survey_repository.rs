@@ -174,6 +174,37 @@ impl SurveyRepository {
         Ok(())
     }
 
+    /// Find comments filtered by date range
+    pub async fn find_comments_by_period(
+        &self,
+        project_id: Uuid,
+        start_date: NaiveDateTime,
+        end_date: NaiveDateTime,
+        limit: i64,
+    ) -> Result<Vec<CommentForAnalysis>, sqlx::Error> {
+        let rows = sqlx::query_as::<_, CommentRow>(
+            r#"
+            SELECT comments, ratings, date, country, device, url
+            FROM survey_responses
+            WHERE project_id = $1
+              AND comments IS NOT NULL
+              AND comments != ''
+              AND date >= $2
+              AND date <= $3
+            ORDER BY date DESC NULLS LAST
+            LIMIT $4
+            "#,
+        )
+        .bind(project_id)
+        .bind(start_date)
+        .bind(end_date)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
+    }
+
     /// Find all comments with metadata for LLM analysis (max 500, most recent first)
     pub async fn find_all_comments(
         &self,

@@ -10,13 +10,15 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::api::handler::{connector, feedback, funnel, ga4, project, survey};
+use crate::api::handler::{connector, cro, feedback, funnel, ga4, project, survey};
 use crate::infrastructure::connector_repository::ConnectorRepository;
+use crate::infrastructure::cro_repository::CroRepository;
 use crate::infrastructure::feedback_repository::FeedbackRepository;
 use crate::infrastructure::project_repository::ProjectRepository;
 use crate::infrastructure::survey_repository::SurveyRepository;
 use crate::services::connector_service::ConnectorService;
 use crate::services::embedding_service::EmbeddingService;
+use crate::services::cro_agent_service::CroAgentService;
 use crate::services::feedback_service::FeedbackService;
 
 #[derive(Clone)]
@@ -27,8 +29,10 @@ pub struct AppState {
     pub project_repo: ProjectRepository,
     pub survey_repo: SurveyRepository,
     pub feedback_repo: FeedbackRepository,
+    pub cro_repo: CroRepository,
     pub embedding_service: EmbeddingService,
     pub feedback_service: FeedbackService,
+    pub cro_agent_service: CroAgentService,
     pub frontend_url: String,
     pub duckdb_base_path: String,
     pub pool: PgPool,
@@ -108,7 +112,8 @@ async fn main() {
 
     let bedrock_token = std::env::var("AWS_BEARER_TOKEN_BEDROCK").ok();
     let anthropic_model = std::env::var("ANTHROPIC_MODEL").ok();
-    let feedback_service = FeedbackService::new(bedrock_token, anthropic_model);
+    let feedback_service = FeedbackService::new(bedrock_token.clone(), anthropic_model.clone());
+    let cro_agent_service = CroAgentService::new(bedrock_token, anthropic_model);
 
     // Log startup configuration
     tracing::info!("=== Startup Configuration ===");
@@ -145,8 +150,10 @@ async fn main() {
         project_repo: ProjectRepository::new(pool.clone()),
         survey_repo: SurveyRepository::new(pool.clone()),
         feedback_repo: FeedbackRepository::new(pool.clone()),
+        cro_repo: CroRepository::new(pool.clone()),
         embedding_service,
         feedback_service,
+        cro_agent_service,
         frontend_url,
         duckdb_base_path,
         pool,
@@ -160,6 +167,7 @@ async fn main() {
         .merge(funnel::routes())
         .merge(survey::routes())
         .merge(feedback::routes())
+        .merge(cro::routes())
         .layer(cors)
         .with_state(state);
 

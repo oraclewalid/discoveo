@@ -63,6 +63,52 @@ impl FeedbackRepository {
         }))
     }
 
+    /// Find the most recent feedback analysis for a project (no TTL filter)
+    pub async fn find_latest(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Option<FeedbackAnalysis>, sqlx::Error> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id, project_id, created_at, response_count, analysis, narrative,
+                   model_used, input_tokens, output_tokens, duration_ms
+            FROM feedback_analyses
+            WHERE project_id = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            project_id,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| {
+            let analysis: StructuredAnalysis =
+                serde_json::from_value(r.analysis).unwrap_or_else(|_| StructuredAnalysis {
+                    themes: vec![],
+                    sentiment_breakdown: crate::models::feedback::SentimentBreakdown {
+                        positive_pct: 0.0,
+                        negative_pct: 0.0,
+                        neutral_pct: 0.0,
+                    },
+                    key_issues: vec![],
+                    recommendations: vec![],
+                });
+
+            FeedbackAnalysis {
+                id: r.id,
+                project_id: r.project_id,
+                created_at: r.created_at,
+                analysis,
+                narrative: r.narrative,
+                model_used: r.model_used,
+                input_tokens: r.input_tokens,
+                output_tokens: r.output_tokens,
+                duration_ms: r.duration_ms,
+            }
+        }))
+    }
+
     pub async fn insert(
         &self,
         analysis: &FeedbackAnalysis,
