@@ -1,4 +1,6 @@
 pub mod connector_repository;
+pub mod cro_repository;
+pub mod feedback_repository;
 pub mod funnel_repository;
 pub mod project_repository;
 pub mod survey_repository;

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue';
 import projectService from '@/services/projectService';
+import croService from '@/services/croService';
 import LoginView from '@/components/LoginView.vue';
 import DashboardView from '@/components/DashboardView.vue';
 import FunnelsView from '@/components/FunnelsView.vue';
 import AIRecommendationView from '@/components/AIRecommendationView.vue';
 import SurveysView from '@/components/SurveysView.vue';
+import SurveyUploadView from '@/components/SurveyUploadView.vue';
 import ProjectList from '@/components/ProjectList.vue';
 import ProjectDetail from '@/components/ProjectDetail.vue';
 import ProjectForm from '@/components/ProjectForm.vue';
@@ -21,10 +23,12 @@ const userProfile = ref({
 });
 
 // Navigation State
-type View = 'overview' | 'funnels' | 'qualitative' | 'recommendations' | 'projects' | 'ga4-callback';
+type View = 'overview' | 'funnels' | 'qualitative' | 'qualitative-upload' | 'recommendations' | 'projects' | 'ga4-callback';
 const currentView = ref<View>('projects');
 const drawer = ref(true);
 const rail = ref(false);
+
+const selectedReportId = ref<string | null>(null);
 
 const STORAGE_KEY = 'discoveo_active_project_id';
 
@@ -45,7 +49,6 @@ const fetchGlobalProjects = async () => {
   try {
     projects.value = await projectService.list();
 
-    // Auto-select from localStorage if possible
     const savedId = localStorage.getItem(STORAGE_KEY);
     if (savedId && !selectedProject.value) {
       const found = projects.value.find((p) => p.id === savedId);
@@ -60,11 +63,28 @@ const fetchGlobalProjects = async () => {
   }
 };
 
+watch(selectedProject, async (newVal) => {
+  if (newVal) {
+    selectedReportId.value = null;
+  }
+});
+
+const handleSelectReport = (reportId: string) => {
+  selectedReportId.value = reportId;
+  currentView.value = 'recommendations';
+};
+
+const formatDateShort = (dateStr: string) => {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  });
+};
+
 const handleLogin = async () => {
   isAuthenticated.value = true;
   await fetchGlobalProjects();
-
-  // If no project selected, force list view in Projects
   if (!selectedProject.value) {
     currentView.value = 'projects';
     currentPage.value = 'list';
@@ -78,12 +98,6 @@ const handleLogout = () => {
   selectedProject.value = undefined;
   localStorage.removeItem(STORAGE_KEY);
   currentView.value = 'projects';
-};
-
-// Project Handlers
-const handleProjectListItemClick = (project: Project) => {
-  selectedProject.value = project;
-  currentView.value = 'overview';
 };
 
 const handleProjectSwitch = (project: Project) => {
@@ -111,13 +125,11 @@ const handleProjectsClick = () => {
 const handleFormSubmit = async (project: Project) => {
   selectedProject.value = project;
   localStorage.setItem(STORAGE_KEY, project.id);
-
   isEditingProject.value = false;
   showForm.value = false;
   currentView.value = 'overview';
   currentPage.value = 'list';
   await fetchGlobalProjects();
-  projectListRef.value?.fetchProjects();
 };
 
 const handleFormCancel = () => {
@@ -149,7 +161,6 @@ onMounted(() => {
   }
 });
 
-// Helper for sidebar logic
 const isProjectActive = computed(() => !!selectedProject.value);
 </script>
 
@@ -174,8 +185,6 @@ const isProjectActive = computed(() => !!selectedProject.value);
         <span v-if="!rail" class="text-h5 font-weight-bold tracking-tight">Discoveo</span>
       </div>
 
-
-
       <v-list nav class="px-4">
         <v-list-item
           prepend-icon="mdi-view-dashboard-outline"
@@ -186,11 +195,7 @@ const isProjectActive = computed(() => !!selectedProject.value);
           @click="currentView = 'overview'"
           rounded="lg"
           class="mb-1"
-        >
-          <template v-slot:append v-if="!isProjectActive">
-            <v-icon icon="mdi-lock-outline" size="14" color="grey-lighten-1" />
-          </template>
-        </v-list-item>
+        />
 
         <v-list-item
           prepend-icon="mdi-filter-variant"
@@ -201,36 +206,77 @@ const isProjectActive = computed(() => !!selectedProject.value);
           @click="currentView = 'funnels'"
           rounded="lg"
           class="mb-1"
-        >
-          <template v-slot:append v-if="!isProjectActive">
-            <v-icon icon="mdi-lock-outline" size="14" color="grey-lighten-1" />
-          </template>
-        </v-list-item>
-
-        <v-list-item
-          prepend-icon="mdi-comment-text-outline"
-          title="Qualitative Data"
-          value="qualitative"
-          :active="currentView === 'qualitative'"
-          @click="currentView = 'qualitative'"
-          rounded="lg"
-          class="mb-1"
         />
 
-        <v-list-item
-          prepend-icon="mdi-auto-fix"
-          title="Recommendations"
-          value="recommendations"
-          :active="currentView === 'recommendations'"
-          :disabled="!isProjectActive"
-          @click="currentView = 'recommendations'"
-          rounded="lg"
-          class="mb-1"
-        >
-          <template v-slot:append v-if="!isProjectActive">
-            <v-icon icon="mdi-lock-outline" size="14" color="grey-lighten-1" />
+        <v-list-group value="qualitative">
+          <template v-slot:activator="{ props }">
+            <v-list-item
+              v-bind="props"
+              prepend-icon="mdi-comment-text-outline"
+              title="Qualitative Data"
+              rounded="lg"
+              class="mb-1"
+              :active="currentView === 'qualitative' || currentView === 'qualitative-upload'"
+              @click="currentView = 'qualitative'"
+            />
           </template>
-        </v-list-item>
+
+          <v-list-item
+            prepend-icon="mdi-chart-box-outline"
+            title="Overview"
+            value="qualitative-overview"
+            :active="currentView === 'qualitative'"
+            @click="currentView = 'qualitative'"
+            rounded="lg"
+            class="mb-1"
+          />
+
+          <v-list-item
+            prepend-icon="mdi-upload-outline"
+            title="Upload CSV"
+            value="qualitative-upload"
+            :active="currentView === 'qualitative-upload'"
+            @click="currentView = 'qualitative-upload'"
+            rounded="lg"
+            class="mb-1"
+          />
+        </v-list-group>
+
+        <v-list-group value="recommendations">
+          <template v-slot:activator="{ props }">
+            <v-list-item
+              v-bind="props"
+              prepend-icon="mdi-auto-fix"
+              title="AI Reports"
+              rounded="lg"
+              class="mb-1"
+              :active="currentView === 'recommendations'"
+              :disabled="!isProjectActive"
+              @click="currentView = 'recommendations'; selectedReportId = null"
+            />
+          </template>
+
+          <v-list-item
+            prepend-icon="mdi-plus-circle-outline"
+            title="New Audit"
+            value="rec-new"
+            @click="currentView = 'recommendations'; selectedReportId = null"
+            :active="currentView === 'recommendations' && !selectedReportId"
+            rounded="lg"
+            class="mb-1"
+          />
+
+          <v-list-item
+            prepend-icon="mdi-history"
+            title="Audit History"
+            value="rec-history"
+            @click="currentView = 'recommendations'; selectedReportId = 'history'"
+            :active="currentView === 'recommendations' && selectedReportId === 'history'"
+            rounded="lg"
+            class="mb-1"
+          />
+
+        </v-list-group>
 
         <v-list-subheader class="text-uppercase text-caption font-weight-bold mt-4">Settings</v-list-subheader>
 
@@ -253,7 +299,6 @@ const isProjectActive = computed(() => !!selectedProject.value);
             <v-btn block size="small" variant="flat" color="primary">Upgrade now</v-btn>
           </v-card>
 
-          <!-- Project Switcher moved to bottom -->
           <v-menu width="248">
             <template v-slot:activator="{ props }">
               <v-btn
@@ -311,21 +356,8 @@ const isProjectActive = computed(() => !!selectedProject.value);
 
     <v-app-bar elevation="0" class="app-bar px-4" height="70">
       <v-app-bar-nav-icon @click="rail = !rail" />
-      
       <v-spacer />
-
-      <v-text-field
-        placeholder="Quick search..."
-        prepend-inner-icon="mdi-magnify"
-        variant="solo"
-        density="compact"
-        hide-details
-        flat
-        class="search-field mr-4 d-none d-sm-flex"
-      />
-
       <v-btn icon="mdi-bell-outline" class="mr-2" />
-      
       <v-menu min-width="200px" rounded>
         <template v-slot:activator="{ props }">
           <v-btn icon v-bind="props" class="ml-2">
@@ -336,89 +368,52 @@ const isProjectActive = computed(() => !!selectedProject.value);
         </template>
         <v-card>
           <v-list>
-            <v-list-item
-              :prepend-avatar="userProfile.avatar"
-              :title="userProfile.name"
-              :subtitle="userProfile.email"
-            >
-              <template v-slot:append>
-                <v-btn icon="mdi-cog" variant="text" size="small" />
-              </template>
-            </v-list-item>
+            <v-list-item :prepend-avatar="userProfile.avatar" :title="userProfile.name" :subtitle="userProfile.email" />
           </v-list>
           <v-divider />
           <v-list nav>
-            <v-list-item prepend-icon="mdi-account-outline" title="Profile" value="profile" />
             <v-list-item prepend-icon="mdi-logout" title="Logout" value="logout" color="error" @click="handleLogout" />
           </v-list>
         </v-card>
       </v-menu>
     </v-app-bar>
 
-    <!-- Main Content Area -->
     <v-main class="main-content bg-grey-lighten-4">
       <v-container fluid class="pa-8">
         <v-fade-transition mode="out-in">
-          <!-- GA4 Callback View -->
           <div v-if="currentView === 'ga4-callback'" key="callback">
             <GA4OAuthCallback />
           </div>
-
-          <!-- Overview -->
           <div v-else-if="currentView === 'overview' && selectedProject" key="overview">
             <DashboardView :project="selectedProject" />
           </div>
-
-          <!-- Funnels -->
           <div v-else-if="currentView === 'funnels' && selectedProject" key="funnels">
             <FunnelsView :project="selectedProject" />
           </div>
-
-          <!-- Qualitative Data -->
           <div v-else-if="currentView === 'qualitative' && selectedProject" key="qualitative">
-            <SurveysView :project-id="selectedProject.id" />
+            <SurveysView :project-id="selectedProject.id" @go-to-upload="currentView = 'qualitative-upload'" />
           </div>
-
-          <!-- Recommendations -->
+          <div v-else-if="currentView === 'qualitative-upload' && selectedProject" key="qualitative-upload">
+            <SurveyUploadView :project-id="selectedProject.id" />
+          </div>
           <div v-else-if="currentView === 'recommendations' && selectedProject" key="recommendations">
-            <AIRecommendationView :project="selectedProject" />
+            <AIRecommendationView
+              :project="selectedProject"
+              :report-id="selectedReportId"
+              @select-report="selectedReportId = $event"
+            />
           </div>
-
-          <!-- Projects (Settings) -->
           <div v-else-if="currentView === 'projects'" key="projects">
-
-
             <v-card class="pa-0 overflow-visible" elevation="0" color="transparent">
               <v-fade-transition mode="out-in">
-                <!-- List View -->
                 <div v-if="currentPage === 'list'" key="list">
-                  <ProjectList
-                    ref="projectListRef"
-                    @view="handleViewProject"
-                    @edit="handleEditProject"
-                    @create="handleCreateNew"
-                    @refresh="fetchGlobalProjects"
-                  />
+                  <ProjectList ref="projectListRef" @view="handleViewProject" @edit="handleEditProject" @create="handleCreateNew" @refresh="fetchGlobalProjects" />
                 </div>
-
-                <!-- Detail View -->
                 <div v-else-if="currentPage === 'detail' && selectedProject" key="detail">
-                  <ProjectDetail
-                    :project="selectedProject"
-                    @back="handleDetailBack"
-                    @edit="isEditingProject = true; showForm = true; currentPage = 'form'"
-                    @delete="currentPage = 'list'; fetchGlobalProjects()"
-                  />
+                  <ProjectDetail :project="selectedProject" @back="handleDetailBack" @edit="isEditingProject = true; showForm = true; currentPage = 'form'" @delete="currentPage = 'list'; fetchGlobalProjects()" />
                 </div>
-
-                <!-- Form View -->
                 <div v-else-if="currentPage === 'form' && showForm" key="form">
-                  <ProjectForm
-                    :project="selectedProject"
-                    :is-editing="isEditingProject"
-                    @submit="handleFormSubmit"
-                    @cancel="handleFormCancel"
-                  />
+                  <ProjectForm :project="selectedProject" :is-editing="isEditingProject" @submit="handleFormSubmit" @cancel="handleFormCancel" />
                 </div>
               </v-fade-transition>
             </v-card>
@@ -430,67 +425,17 @@ const isProjectActive = computed(() => !!selectedProject.value);
 </template>
 
 <style>
-/* Global Styles for Iqonic Aesthetic */
-body {
-  font-family: 'Inter', sans-serif !important;
-}
-
-.sidebar-drawer {
-  border-right: 1px solid #e2e8f0 !important;
-}
-
+body { font-family: 'Inter', sans-serif !important; }
+.sidebar-drawer { border-right: 1px solid #e2e8f0 !important; }
 .lh-1 { line-height: 1; }
-
-.project-switcher-btn {
-  text-transform: none !important;
-  border-color: #e2e8f0 !important;
-  border-radius: 12px !important;
-}
-
-.project-switcher-btn:hover {
-  background: #f8fafc !important;
-}
-
-.app-bar {
-  border-bottom: 1px solid #e2e8f0 !important;
-  background: white !important;
-}
-
-.search-field {
-  max-width: 400px;
-}
-
-.search-field .v-field {
-  background: #f1f5f9 !important;
-  border-radius: 12px !important;
-}
-
-.tracking-tight {
-  letter-spacing: -0.025em;
-}
-
-.main-content {
-  min-height: 100vh;
-}
-
-/* Custom Vuetify Overrides for Premium Feel */
-.v-list-item--active {
-  background: rgba(99, 102, 241, 0.1) !important;
-  color: #6366f1 !important;
-}
-
-.v-list-item--active .v-icon {
-  color: #6366f1 !important;
-}
-
-.v-btn {
-  font-weight: 600 !important;
-  letter-spacing: 0px !important;
-}
-
-.v-list-subheader {
-  font-size: 11px !important;
-  color: #94a3b8 !important;
-  letter-spacing: 0.05em !important;
-}
+.project-switcher-btn { text-transform: none !important; border-color: #e2e8f0 !important; border-radius: 12px !important; }
+.project-switcher-btn:hover { background: #f8fafc !important; }
+.app-bar { border-bottom: 1px solid #e2e8f0 !important; background: white !important; }
+.main-content { min-height: 100vh; }
+.v-list-item--active { background: rgba(99, 102, 241, 0.1) !important; color: #6366f1 !important; }
+.v-list-item--active .v-icon { color: #6366f1 !important; }
+.v-btn { font-weight: 600 !important; letter-spacing: 0px !important; }
+.v-list-subheader { font-size: 11px !important; color: #94a3b8 !important; letter-spacing: 0.05em !important; }
+.nested-list-item { padding-left: 32px !important; }
+.text-tiny { font-size: 0.7rem; opacity: 0.7; }
 </style>
